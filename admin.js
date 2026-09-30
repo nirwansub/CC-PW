@@ -1,104 +1,29 @@
 const $=s=>document.querySelector(s);
-const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m]));
-const api=async(action,opt={})=>{
-  const r=await fetch("/api/index?action="+action,opt);
-  let j={};try{j=await r.json()}catch{}
-  if(!r.ok)throw new Error(j.error||"Error");
-  return j;
-};
-let config=null,subs=[],selected=null,review=null;
-
-async function auth(){
-  const m=await api("admin-me");
-  if(!m.authenticated){
-    $("#login").innerHTML="<section class='card' style='max-width:460px;margin:auto'><h2>Admin Login</h2><div class='field'><label>PASSWORD</label><input id='pw' type='password' autocomplete='current-password'></div><button class='btn blue' id='loginBtn'>Masuk</button><div id='loginMsg'></div></section>";
-    $("#loginBtn").onclick=login; return;
-  }
-  $("#login").classList.add("hidden"); $("#admin").classList.remove("hidden");
-  config=await api("admin-config"); fillRoles(); wireTabs(); await loadSubs();
-}
-async function login(){
-  try{
-    await api("admin-login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:$("#pw").value})});
-    location.reload();
-  }catch(e){$("#loginMsg").innerHTML="<p class='danger'>"+esc(e.message)+"</p>"}
-}
-function wireTabs(){
-  document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{
-    document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active")); b.classList.add("active");
-    $("#tab-results").classList.toggle("hidden",b.dataset.tab!=="results");
-    $("#tab-invite").classList.toggle("hidden",b.dataset.tab!=="invite");
-  });
-  $("#search").oninput=renderList; $("#createInvite").onclick=createInvite;
-}
-function fillRoles(){
-  $("#invRole").innerHTML=Object.entries(config.roles).map(([k,v])=>"<option value='"+k+"'>"+esc(v.team)+" · "+esc(v.role)+"</option>").join("");
-  $("#invRole").onchange=()=>$("#invDuration").value=config.roles[$("#invRole").value].duration;
-  $("#invRole").onchange();
-}
-async function createInvite(){
-  try{
-    const r=await api("admin-invite",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-      candidateName:$("#invName").value.trim(),roleKey:$("#invRole").value,duration:Number($("#invDuration").value),expiresHours:Number($("#invExpiry").value)
-    })});
-    const link=location.origin+"/?invite="+encodeURIComponent(r.invite.token);
-    $("#inviteResult").innerHTML="<div class='spacer'></div><div class='codebox' id='newLink'>"+esc(link)+"</div><div class='spacer' style='height:8px'></div><button class='btn' id='copyLink'>Copy Link</button>";
-    $("#copyLink").onclick=async()=>{await navigator.clipboard.writeText(link);$("#copyLink").textContent="Copied"};
-  }catch(e){$("#inviteResult").innerHTML="<p class='danger'>"+esc(e.message)+"</p>"}
-}
-async function loadSubs(){
-  const r=await api("admin-submissions"); subs=r.submissions||[]; renderList();
-}
-function renderList(){
-  const q=($("#search")?.value||"").toLowerCase();
-  const arr=subs.filter(s=>(s.candidateName+" "+s.team+" "+s.role).toLowerCase().includes(q));
-  $("#submissionList").innerHTML=arr.length?arr.map(s=>{
-    const cls=s.terminated?"red":s.score>=75?"green":"amber";
-    return "<div class='listitem "+(selected===s.submissionId?"active":"")+"' data-id='"+s.submissionId+"'><b>"+esc(s.candidateName||"Tanpa nama")+"</b><div class='small muted'>"+esc(s.team)+" · "+esc(s.role)+"</div><div class='row' style='justify-content:space-between;margin-top:7px'><span class='pill "+cls+"'>"+(s.terminated?"TERMINATED":s.score+"%")+"</span><span class='small muted'>"+new Date(s.finishedAt).toLocaleDateString("id-ID")+"</span></div></div>";
-  }).join(""):"<div class='small muted'>Belum ada hasil.</div>";
-  document.querySelectorAll(".listitem").forEach(x=>x.onclick=()=>openDetail(x.dataset.id));
-}
-async function openDetail(id){
-  selected=id;renderList();
-  const r=await api("admin-submissions&id="+encodeURIComponent(id));
-  review=r.review||{ratings:{},notes:""};renderDetail(r.submission);
-}
-function roleFits(ratings){
-  const val={yes:2,mid:1,no:0};
-  return Object.entries(config.weights).map(([roleKey,weights])=>{
-    let got=0,max=0,answered=0;
-    for(const [trait,w] of Object.entries(weights)){max+=w*2;if(ratings[trait]){got+=(val[ratings[trait]]||0)*w;answered+=w}}
-    return {roleKey,label:config.roles[roleKey].team+" · "+config.roles[roleKey].role,score:max?Math.round(got/max*100):0,coverage:Math.round(answered/Object.values(weights).reduce((a,b)=>a+b,0)*100)};
-  }).sort((a,b)=>b.score-a.score);
-}
-function renderDetail(s){
-  const caps=(s.capability||[]).map(c=>"<div class='fit-card'><span class='small muted'>"+esc(c.label)+"</span><strong>"+c.score+"%</strong><div class='bar'><span style='width:"+c.score+"%'></span></div></div>").join("");
-  const sec=(s.securityEvents||[]).map(x=>"<li>"+esc(x.type)+" · "+new Date(x.at).toLocaleString("id-ID")+"</li>").join("")||"<li>Tidak ada security event.</li>";
-  const ratings=review.ratings||{};
-  const traits=config.traits.map(t=>{
-    const v=ratings[t]||"";
-    return "<tr><td>"+esc(t)+"</td><td><div class='seg'>"+
-      ["yes","mid","no"].map(k=>"<button data-trait='"+esc(t)+"' data-val='"+k+"' class='"+(v===k?"on":"")+"'>"+({yes:"Ya",mid:"Sedang",no:"Tidak"}[k])+"</button>").join("")+
-      "</div></td></tr>";
-  }).join("");
-  const fits=roleFits(ratings).map(f=>"<div class='fit-card'><span class='small muted'>"+esc(f.label)+"</span><strong>"+f.score+"%</strong><div class='bar'><span style='width:"+f.score+"%'></span></div><div class='small muted' style='margin-top:5px'>Checklist coverage "+f.coverage+"%</div></div>").join("");
-  $("#detail").innerHTML="<div class='card'><div class='row' style='justify-content:space-between;align-items:flex-start'><div><span class='tag'>"+esc(s.team)+" · "+esc(s.role)+"</span><h2 style='margin:10px 0 4px'>"+esc(s.candidateName)+"</h2><div class='muted'>"+esc(s.identity?.contact||"")+(s.identity?.currentRole?" · "+esc(s.identity.currentRole):"")+"</div></div><div style='text-align:right'><div class='kpi'>"+s.score+"%</div><span class='pill "+(s.terminated?"red":s.score>=75?"green":"amber")+"'>"+esc(s.terminated?"TERMINATED":s.band)+"</span></div></div>"+
-    "<div class='hr'></div><div class='grid4'><div><div class='small muted'>BENAR</div><b>"+s.correct+"/"+s.total+"</b></div><div><div class='small muted'>DURASI</div><b>"+Math.round(s.durationSeconds/60)+" mnt</b></div><div><div class='small muted'>MULAI</div><b>"+new Date(s.startedAt).toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit"})+"</b></div><div><div class='small muted'>SELESAI</div><b>"+new Date(s.finishedAt).toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit"})+"</b></div></div>"+
-    (s.terminated?"<div class='spacer'></div><div class='warning'><b>Termination:</b> "+esc(s.terminationReason||"security violation")+"</div>":"")+
-    "<div class='hr'></div><h3>Automatic capability breakdown</h3><div class='grid3'>"+caps+"</div><div class='hr'></div><h3>Security log</h3><ul class='security-list'>"+sec+"</ul></div>"+
-    "<div class='spacer'></div><div class='card'><h2>Capability Checklist</h2><p class='muted'>Isi berdasarkan observasi/interview. Ya = kuat, Sedang = perlu validasi/pengembangan, Tidak = lemah.</p><div class='grid'><div><table class='trait-table'><thead><tr><th>TRAIT</th><th>RATING</th></tr></thead><tbody>"+traits+"</tbody></table></div><div><h3>Role-fit dari checklist</h3><div id='fits' class='grid'>"+fits+"</div><div class='field' style='margin-top:20px'><label>CATATAN ADMIN</label><textarea id='notes'>"+esc(review.notes||"")+"</textarea></div><button class='btn blue' id='saveReview'>Simpan Checklist</button><div id='saveMsg'></div></div></div></div>";
-  document.querySelectorAll(".seg button").forEach(b=>b.onclick=()=>{
-    review.ratings[b.dataset.trait]=b.dataset.val;
-    document.querySelectorAll(".seg button[data-trait='"+CSS.escape(b.dataset.trait)+"']").forEach(x=>x.classList.toggle("on",x.dataset.val===b.dataset.val));
-    $("#fits").innerHTML=roleFits(review.ratings).map(f=>"<div class='fit-card'><span class='small muted'>"+esc(f.label)+"</span><strong>"+f.score+"%</strong><div class='bar'><span style='width:"+f.score+"%'></span></div><div class='small muted' style='margin-top:5px'>Checklist coverage "+f.coverage+"%</div></div>").join("");
-  });
-  $("#saveReview").onclick=saveReview;
-}
-async function saveReview(){
-  try{
-    review.notes=$("#notes").value;
-    await api("admin-review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({submissionId:selected,ratings:review.ratings,notes:review.notes})});
-    $("#saveMsg").innerHTML="<p class='success'>Tersimpan.</p>";
-  }catch(e){$("#saveMsg").innerHTML="<p class='danger'>"+esc(e.message)+"</p>"}
-}
-auth().catch(e=>{$("#login").innerHTML="<div class='warning'>"+esc(e.message)+"</div>"});
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+let config,records=[],selected=null,current=null,view='assessment';
+async function api(action,data,params={}){const r=await fetch('/api/index?'+new URLSearchParams({action,...params}),data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});let j;try{j=await r.json();}catch{throw new Error('Koneksi bermasalah');}if(!r.ok)throw new Error(j.error||'Terjadi kendala');return j;}
+const msg=(id,s,ok=false)=>{const e=$(id);if(e){e.textContent=s;e.className=ok?'small success':'small danger';}};
+const roleLabel=k=>config.roles[k]?config.roles[k].team+' · '+config.roles[k].role:k;
+const stageLabel=s=>s==='pre'?'Pre-assessment':(s.startsWith('post:')?'Post-test · ':'Practical · ')+roleLabel(s.split(':')[1]);
+async function auth(){const a=await api('admin-me');if(!a.authenticated){$('#login').innerHTML='<section class="card hero"><h1>Admin login.</h1><div class="field"><label for="pw">PASSWORD</label><input type="password" id="pw" autocomplete="current-password"></div><button class="btn blue" id="loginBtn">Masuk</button><p id="loginMsg"></p></section>';$('#loginBtn').onclick=login;$('#pw').onkeydown=e=>{if(e.key==='Enter')login();};return;}$('#login').classList.add('hidden');$('#admin').classList.remove('hidden');$('#logout').classList.remove('hidden');config=await api('admin-config');wire();renderAI();renderBank();await load();}
+async function login(){try{await api('admin-login',{password:$('#pw').value});await auth();}catch(e){msg('#loginMsg',e.message);}}
+function wire(){document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{for(const el of document.querySelectorAll('[data-tab]'))el.classList.toggle('active',el===b);for(const id of ['results','invite','settings','bank'])$('#'+id).classList.toggle('hidden',id!==b.dataset.tab);});$('#logout').onclick=async()=>{await api('admin-logout',{});location.reload();};$('#search').oninput=renderList;$('#refreshList').onclick=()=>load().catch(e=>msg('#listMsg',e.message));$('#createInvite').onclick=create;$('#saveAI').onclick=saveAI;}
+function renderAI(){$('#aiStatus').innerHTML='<p class="pill '+(config.ai.configured?'green':'amber')+'">'+(config.ai.configured?'API key terpasang':'API key belum terpasang')+'</p><p class="small muted">Model: '+esc(config.ai.model)+'</p>';$('#model').value=config.ai.model;}
+async function saveAI(){const btn=$('#saveAI');btn.disabled=true;try{await api('admin-ai',{apiKey:$('#apiKey').value.trim(),model:$('#model').value.trim()});$('#apiKey').value='';config=await api('admin-config');renderAI();msg('#aiMsg','Konfigurasi tersimpan. Proses satu jawaban uji untuk memverifikasi layanan AI.',true);}catch(e){msg('#aiMsg',e.message);}finally{btn.disabled=false;}}
+async function create(){const btn=$('#createInvite');btn.disabled=true;$('#inviteResult').innerHTML='';try{const r=await api('admin-invite',{candidateName:$('#invName').value.trim(),duration:Number($('#invDuration').value),expiresHours:Number($('#invExpiry').value)});const link=location.origin+'/?invite='+r.token;$('#inviteResult').innerHTML='<div class="codebox" id="newLink">'+esc(link)+'</div><div class="spacer"></div><button class="btn" id="copy">Salin link</button> <a class="btn" href="'+esc(link)+'" target="_blank" rel="noopener">Buka</a>';$('#copy').onclick=async()=>{try{await navigator.clipboard.writeText(link);$('#copy').textContent='Tersalin';}catch{msg('#inviteMsg','Salin link yang tampil secara manual.');}};msg('#inviteMsg','Undangan dibuat.',true);await load();}catch(e){msg('#inviteMsg',e.message);}finally{btn.disabled=false;}}
+async function load(){const r=await api('admin-submissions');records=r.records;renderList();$('#legacy').innerHTML=(r.legacy||[]).map(x=>'<p>'+esc(x.candidateName)+' · '+esc(x.team)+' · '+esc(x.role)+' · '+x.score+'%</p>').join('')||'<p class="muted">Tidak ada arsip.</p>';}
+function renderList(){const q=$('#search').value.toLowerCase();$('#list').innerHTML=records.filter(r=>(r.candidateName+' '+r.shortlist.map(x=>roleLabel(x.roleKey)).join(' ')).toLowerCase().includes(q)).map(r=>'<div class="listitem '+(selected===r.token?'active':'')+'" data-token="'+r.token+'"><b>'+esc(r.candidateName)+'</b><div class="small muted">'+new Date(r.createdAt).toLocaleDateString('id-ID')+'</div><span class="pill '+(r.stages.pre?.status==='terminated'?'red':r.stages.pre?.grading==='complete'?'green':'amber')+'">'+esc(r.stages.pre?.status||'Diundang')+' · '+esc(r.stages.pre?.grading||'Belum dinilai')+'</span>'+(r.reviewRequired?'<p class="small danger">Perlu validasi</p>':'')+'</div>').join('')||'<p class="muted">Belum ada kandidat.</p>';document.querySelectorAll('[data-token]').forEach(b=>b.onclick=()=>open(b.dataset.token));}
+async function open(token){try{selected=token;renderList();current=await api('admin-submissions',null,{id:token});renderDetail();}catch(e){msg('#listMsg',e.message);}}
+function fitsTable(fits,preferences=[]){return '<div class="wide-table"><table><thead><tr><th>Posisi</th><th>Evidence fit</th><th>Cakupan</th><th>Preferensi</th></tr></thead><tbody>'+fits.map(f=>'<tr><td>'+esc(roleLabel(f.roleKey))+'</td><td>'+f.score+'%</td><td>'+f.coverage+'%</td><td>'+(preferences.includes(f.roleKey)?'Dipilih':'Potensi lain')+'</td></tr>').join('')+'</tbody></table></div>';}
+function renderDetail(){const r=current.record;$('#detail').innerHTML='<section class="card"><span class="tag">'+esc(r.version)+'</span><h2>'+esc(r.candidateName)+'</h2><p class="muted">'+esc(r.identity?.contact||'Belum mulai')+'</p><div class="detail-tabs"><button id="assessmentTab" class="btn '+(view==='assessment'?'blue':'')+'">Assessment</button><button id="profileTab" class="btn '+(view==='profile'?'blue':'')+'">Personal Profile</button></div><div id="detailContent"></div></section>';$('#assessmentTab').onclick=()=>{view='assessment';renderDetail();};$('#profileTab').onclick=()=>{view='profile';renderDetail();};if(view==='profile')renderProfile(r);else renderAssessment(r);}
+function renderProfile(r){const labels={interests:'Minat',talents:'Bakat',education:'Pendidikan',reading:'Bacaan',hobbies:'Hobi',learningInterests:'Minat belajar',mbti:'MBTI',zodiac:'Zodiak',rolePreferences:'Catatan preferensi',english:'English'};$('#detailContent').innerHTML='<div class="notice small">Seluruh profil opsional dan non-scoring. English tidak memengaruhi ranking, routing atau kelulusan.</div><p>Status: '+esc(r.profileStatus)+'</p>'+Object.entries(labels).map(([k,l])=>'<h3>'+esc(l)+'</h3><p class="prewrap">'+esc(r.profile?.[k]||'Tidak diisi')+'</p>').join('');}
+function renderAssessment(r){const pre=r.stages.pre;const route=current.routing;const final=current.roleResults||[];let html='<h3>Preferensi kandidat</h3><p>'+esc(r.preferences.map(roleLabel).join(' / ')||'Belum dipilih')+'</p>';
+ if(route?.status==='ready'&&pre?.status==='submitted')html+='<h3>Pendalaman otomatis · maksimal 2 posisi</h3><div class="grid">'+route.shortlist.map(f=>'<div class="fit-card"><span>'+esc(roleLabel(f.roleKey))+'</span><strong>'+f.score+'%</strong><p class="small">'+(f.applied?'Dipilih kandidat':'Potensi posisi lain')+'</p></div>').join('')+'</div>'+(route.thirdFlag?'<p class="warning small">Posisi ketiga berdekatan: '+esc(roleLabel(route.thirdFlag.roleKey))+'. '+esc(route.thirdFlag.reason)+' Tidak otomatis ditambahkan.</p>':'');
+ if(final.length)html+='<h3>Perkembangan &amp; practical</h3><div class="wide-table"><table><thead><tr><th>Posisi</th><th>Pre</th><th>Post</th><th>Gain*</th><th>Practical</th><th>Gabungan</th></tr></thead><tbody>'+final.map(f=>'<tr><td>'+esc(roleLabel(f.roleKey))+'</td><td>'+f.pre+'</td><td>'+(f.post??'—')+'</td><td>'+(f.gain===null?'—':(f.gain>0?'+':'')+f.gain)+'</td><td>'+(f.practical??'—')+'</td><td>'+(f.final??'—')+'</td></tr>').join('')+'</tbody></table></div><p class="small muted">*Gain adalah selisih poin evidence fit pre–post, bukan ukuran belajar yang sudah tervalidasi. Bobot pilot gabungan: pre 50%, post 30%, practical 20%.</p>';
+ html+=Object.entries(r.stages).map(([stage,s])=>'<div class="stage-box"><h3>'+esc(stageLabel(stage))+'</h3><p>Status: '+esc(s.status)+' · Penilaian: '+esc(s.grading?.status||'pending')+'</p>'+(s.terminationReason?'<p class="danger">Tes diakhiri: '+esc(s.terminationReason)+'</p>':'')+(s.reviewRequired?'<p class="warning small">Perlu validasi: confidence rendah, flag rubrik, atau penghentian tes.</p>':'')+(s.result?'<div class="grid3">'+s.result.capability.map(c=>'<div class="fit-card"><span class="small">'+esc(c.label)+'</span><strong>'+c.score+'%</strong><span class="small muted">'+c.observations+' evidence</span></div>').join('')+'</div><p class="small muted">'+(s.result.complete?'Seluruh komponen dinilai.':'Sementara: esai belum seluruhnya dinilai; routing belum final.')+'</p>':'')+(stage==='pre'&&s.result?fitsTable(s.result.roleFits,r.preferences):'')+(['submitted','terminated'].includes(s.status)?'<div class="row"><button class="btn blue" data-grade="'+stage+'">'+(s.grading?.status==='complete'?'Sudah dinilai':'Proses penilaian AI')+'</button><button class="btn" data-evidence="'+stage+'">Jawaban &amp; rubrik / review</button></div>':'')+(s.securityEvents?.length?'<h4>Security log</h4><ul>'+s.securityEvents.map(x=>'<li>'+esc(x.type)+' · '+new Date(x.at).toLocaleString('id-ID')+'</li>').join('')+'</ul>':'')+(s.grading?.model?'<p class="small muted">Model '+esc(s.grading.model)+' · Rubrik '+esc(s.grading.version)+' · '+new Date(s.grading.gradedAt).toLocaleString('id-ID')+'</p>':'')+'<div id="evidence-'+stage.replaceAll(':','-')+'"></div></div>').join('');
+ html+='<h3>Catatan validasi / checklist kemampuan</h3><p class="small muted">Catatan interview atau observasi melengkapi evidence. Override nilai hanya digunakan untuk pengecualian dan tercatat dengan alasan.</p><div class="field"><textarea id="notes" maxlength="5000">'+esc(r.notes||'')+'</textarea></div><button id="saveNotes" class="btn">Simpan catatan</button><p id="detailMsg"></p>';
+ $('#detailContent').innerHTML=html;document.querySelectorAll('[data-grade]').forEach(b=>{if(r.stages[b.dataset.grade].grading?.status==='complete')b.disabled=true;else b.onclick=()=>grade(b.dataset.grade,b);});document.querySelectorAll('[data-evidence]').forEach(b=>b.onclick=()=>showEvidence(b.dataset.evidence));$('#saveNotes').onclick=async()=>{try{await api('admin-notes',{token:r.token,notes:$('#notes').value});msg('#detailMsg','Catatan tersimpan.',true);}catch(e){msg('#detailMsg',e.message);}};}
+async function grade(stage,btn){btn.disabled=true;btn.textContent='Menilai…';try{await api('admin-grade',{token:selected,stage});await open(selected);await load();}catch(e){msg('#detailMsg',e.message);btn.disabled=false;btn.textContent='Coba nilai lagi';}}
+async function showEvidence(stage){const s=current.record.stages[stage];const container=$('#evidence-'+stage.replaceAll(':','-'));if(container.innerHTML){container.innerHTML='';return;}const qs=stage==='pre'?config.bank:(await api('admin-bank',null,{stage})).questions;const essays=qs.filter(q=>q.type==='essay'&&s.answers[q.id]?.trim());container.innerHTML='<div class="hr"></div>'+qs.map(q=>{const a=s.answers[q.id];return'<details class="evidence"><summary>'+esc(q.id)+' · '+esc(q.q)+'</summary><p class="prewrap">'+esc(q.type==='sjt'?q.options[a]?.text||'Tidak dijawab':a||'Tidak dijawab')+'</p>'+(q.criteria?'<ul>'+q.criteria.map(c=>'<li><b>'+esc(config.caps[c.cap])+'</b>: '+esc(c.description)+'</li>').join('')+'</ul>':'')+(s.grades?.find(g=>g.id===q.id)?.criteria||[]).map(c=>'<p><b>'+esc(config.caps[c.cap])+': '+c.score+'/4</b> · confidence '+c.confidence+'<br><q>'+esc(c.evidence)+'</q></p>').join('')+'</details>';}).join('')+(essays.length?'<details class="evidence"><summary>Review pengecualian / override rubrik</summary><p class="small muted">Gunakan hanya saat AI gagal atau hasil perlu koreksi. Evidence harus kutipan persis jawaban kandidat. Semua kriteria esai pada tahap ini harus terisi.</p>'+essays.map(q=>'<h4>'+esc(q.id)+'</h4>'+q.criteria.map(c=>{const g=s.grades?.find(x=>x.id===q.id)?.criteria.find(x=>x.cap===c.cap);return'<div class="grid"><div class="field"><label>'+esc(config.caps[c.cap])+' · SKOR 0–4</label><input type="number" min="0" max="4" step="1" data-override-score="'+q.id+'|'+c.cap+'" value="'+(g?.score??0)+'"></div><div class="field"><label>KUTIPAN PERSIS DARI JAWABAN</label><input data-override-evidence="'+q.id+'|'+c.cap+'" value="'+esc(g?.evidence||'')+'"></div></div>';}).join('')).join('')+'<div class="field"><label>ALASAN OVERRIDE</label><textarea id="override-reason-'+stage.replaceAll(':','-')+'"></textarea></div><button class="btn" id="override-'+stage.replaceAll(':','-')+'">Simpan review pengecualian</button><p id="override-msg-'+stage.replaceAll(':','-')+'"></p></details>':'');const btn=$('#override-'+stage.replaceAll(':','-'));if(btn)btn.onclick=async()=>{try{const grades=essays.map(q=>({id:q.id,criteria:q.criteria.map(c=>({cap:c.cap,score:Number(container.querySelector('[data-override-score="'+q.id+'|'+c.cap+'"]').value),evidence:container.querySelector('[data-override-evidence="'+q.id+'|'+c.cap+'"]').value,confidence:1})),flags:[]}));await api('admin-review',{token:selected,stage,grades,reason:$('#override-reason-'+stage.replaceAll(':','-')).value});await open(selected);}catch(e){msg('#override-msg-'+stage.replaceAll(':','-'),e.message);}};}
+function renderBank(){$('#bankContent').innerHTML='<div class="field"><label>TAHAP</label><select id="bankStage"><option value="pre">Pre-assessment universal</option>'+Object.keys(config.roles).map(k=>'<option value="post:'+k+'">Post-test · '+esc(roleLabel(k))+'</option><option value="practical:'+k+'">Practical · '+esc(roleLabel(k))+'</option>').join('')+'</select></div><div id="bankQuestions"></div><h3>Bobot draft per posisi</h3>'+Object.keys(config.roles).map(k=>'<details class="evidence"><summary>'+esc(roleLabel(k))+'</summary><p>'+Object.entries(config.weights[k]).map(([c,w])=>esc(config.caps[c])+': '+w).join(' · ')+'</p></details>').join('');const display=qs=>$('#bankQuestions').innerHTML=qs.map(q=>'<details class="evidence"><summary>'+esc(q.id)+' · '+esc(q.q)+'</summary>'+(q.options?'<ol>'+q.options.map(o=>'<li>'+esc(o.text)+'<p class="small muted">'+Object.entries(o.signals).map(([c,v])=>esc(config.caps[c])+': '+v+'/4').join(' · ')+'</p></li>').join('')+'</ol>':'<ul>'+q.criteria.map(c=>'<li>'+esc(config.caps[c.cap])+': '+esc(c.description)+'</li>').join('')+'</ul>')+'</details>').join('');display(config.bank);$('#bankStage').onchange=async()=>{try{display((await api('admin-bank',null,{stage:$('#bankStage').value})).questions);}catch(e){$('#bankQuestions').textContent=e.message;}};}
+auth().catch(e=>{$('#login').innerHTML='<p class="danger">'+esc(e.message)+'</p>';});

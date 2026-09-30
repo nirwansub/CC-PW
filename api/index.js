@@ -1,124 +1,71 @@
-import crypto from "crypto";
-import {get,list,put} from "@vercel/blob";
-import {ROLES,QUESTIONS,TRAIT_LABELS,CAPABILITY_TRAITS,ROLE_TRAIT_WEIGHTS} from "./data.js";
-
-const json=(res,status,data)=>res.status(status).json(data);
-const body=req=>typeof req.body==="string"?JSON.parse(req.body||"{}"):(req.body||{});
-const uid=(n=18)=>crypto.randomBytes(n).toString("base64url");
-const sign=v=>crypto.createHmac("sha256",process.env.ADMIN_SECRET||process.env.ADMIN_PASSWORD||"change-me").update(v).digest("hex");
-const cookies=req=>Object.fromEntries(String(req.headers.cookie||"").split(";").map(x=>x.trim()).filter(Boolean).map(x=>{const i=x.indexOf("=");return[decodeURIComponent(x.slice(0,i)),decodeURIComponent(x.slice(i+1))]}));
-const isAdmin=req=>{const c=cookies(req).ansena_admin;if(!c)return false;const [v,s]=c.split(".");return v==="ok"&&s===sign("ok")};
-const requireAdmin=(req,res)=>{if(!isAdmin(req)){json(res,401,{error:"Unauthorized"});return false}return true};
-const putJson=(path,obj)=>put(path,JSON.stringify(obj),{access:"private",contentType:"application/json",allowOverwrite:true,addRandomSuffix:false});
-async function getJson(path){
-  const r=await get(path,{access:"private",useCache:false});
-  if(!r||r.statusCode!==200)return null;
-  return JSON.parse(await new Response(r.stream).text());
+import crypto from 'node:crypto';
+import {ROLES,CAPS,WEIGHTS,VERSION,PILOT,DURATION,HANDBOOK,COMMON_HANDBOOK,questionsFor,publicQuestions} from '../lib/assessment.js';
+import {validateAnswers,aggregate,routing,candidateSummary,finalRoleResults} from '../lib/scoring.js';
+import {gradeEssays} from '../lib/grading.js';
+import {read,write,mutate,listValues,Conflict} from '../lib/storage.js';
+const uid=()=>crypto.randomBytes(24).toString('base64url');
+const response=(res,status,data)=>res.status(status).json(data);
+const error=(status,message)=>Object.assign(new Error(message),{status});
+const body=req=>{const b=typeof req.body==='string'?JSON.parse(req.body||'{}'):req.body||{};if(JSON.stringify(b).length>80000)throw error(413,'Data terlalu besar');return b;};
+const query=(req,k)=>new URL(req.url,'https://local').searchParams.get(k)||'';
+const safeToken=t=>{if(!/^[A-Za-z0-9_-]{24,64}$/.test(t||''))throw error(400,'Kode tidak valid');return t;};
+const path=t=>'assessments/v2/'+safeToken(t)+'.json';
+const secret=()=>{if(!process.env.ADMIN_SECRET)throw error(503,'ADMIN_SECRET belum terpasang');return process.env.ADMIN_SECRET;};
+const sign=s=>crypto.createHmac('sha256',secret()).update(s).digest('base64url');
+const equal=(a,b)=>{const x=Buffer.from(String(a)),y=Buffer.from(String(b));return x.length===y.length&&crypto.timingSafeEqual(x,y);};
+const cookie=req=>String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('ansena_admin='))?.slice(13);
+function isAdmin(req){try{const c=cookie(req);if(!c)return false;const [v,s]=c.split('.');if(v==='ok')return equal(s,crypto.createHmac('sha256',secret()).update('ok').digest('hex'));const exp=Number(v);return exp>Date.now()&&equal(s,sign(v));}catch{return false;}}
+function admin(req){if(!isAdmin(req))throw error(401,'Silakan login admin');}
+const keyMaterial=()=>crypto.createHash('sha256').update(secret()).digest();
+function encrypt(value){const iv=crypto.randomBytes(12);const c=crypto.createCipheriv('aes-256-gcm',keyMaterial(),iv);const v=Buffer.concat([c.update(value,'utf8'),c.final()]);return[iv,c.getAuthTag(),v].map(x=>x.toString('base64')).join('.');}
+function decrypt(value){const[iv,tag,v]=value.split('.').map(x=>Buffer.from(x,'base64'));const d=crypto.createDecipheriv('aes-256-gcm',keyMaterial(),iv);d.setAuthTag(tag);return Buffer.concat([d.update(v),d.final()]).toString('utf8');}
+async function aiConfig(){const settings=(await read('settings/v2-ai.json'))?.value||{};return{key:process.env.OPENAI_API_KEY||(settings.encryptedKey?decrypt(settings.encryptedKey):''),model:process.env.ASSESSMENT_AI_MODEL||settings.model||'gpt-4o-mini'};}
+async function record(t){const r=await read(path(t));if(!r)throw error(404,'Undangan tidak ditemukan. Undangan versi lama perlu dibuat ulang oleh admin.');return r.value;}
+function allowed(r,stage){if(!questionsFor(stage))throw error(400,'Tahap tidak valid');if(stage==='pre')return;const[kind,role]=stage.split(':');if(r.stages.pre?.status!=='submitted'||!r.stages.pre?.result?.complete||!routing(r.stages.pre.result,r.preferences).shortlist.some(x=>x.roleKey===role))throw error(409,'Pendalaman belum tersedia');if(kind==='post'&&!r.materialRead?.[role])throw error(409,'Baca materi sebelum post-test');if(kind==='practical'&&(r.stages[`post:${role}`]?.status!=='submitted'||!r.stages[`post:${role}`]?.result?.complete))throw error(409,'Selesaikan penilaian post-test dahulu');}
+function active(r,stage){const s=r.stages[stage];if(!s||s.status!=='active')throw error(409,'Tes tidak aktif');return s;}
+function cleanProfile(p){const allowed=['interests','talents','education','reading','hobbies','learningInterests','mbti','zodiac','rolePreferences','english'];const out={};for(const k of allowed){if(p[k]!==undefined){if(typeof p[k]!=='string'||p[k].length>2000)throw error(400,'Profil tidak valid');out[k]=p[k].trim();}}return out;}
+async function evaluate(token,stage){
+ const p=path(token);let snapshot;const jobId=uid();
+ await mutate(p,r=>{allowed(r,stage);const s=r.stages[stage];if(!s||!['submitted','terminated'].includes(s.status))throw error(409,'Jawaban belum dikirim');if(s.grading?.status==='complete'){snapshot=null;return;}
+ if(s.grading?.status==='running'&&s.grading.expiresAt>Date.now())throw error(409,'Penilaian sedang berjalan');s.grading={status:'running',jobId,expiresAt:Date.now()+70000};snapshot=structuredClone(s);});
+ if(!snapshot)return{ok:true};
+ try{const cfg=await aiConfig();const evaluated=await gradeEssays(stage,snapshot.answers,cfg.key,cfg.model);const result=aggregate(stage,snapshot.answers,evaluated.grades);
+ await mutate(p,r=>{const s=r.stages[stage];if(s.grading?.jobId!==jobId)throw error(409,'Penilaian sudah diperbarui');s.grades=evaluated.grades;s.result=result;s.grading={...evaluated,status:'complete',grades:undefined};s.reviewRequired=evaluated.reviewRequired||s.status==='terminated';});return{ok:true};
+ }catch(e){await mutate(p,r=>{const s=r.stages[stage];if(s.grading?.jobId===jobId)s.grading={status:e.code==='AI_NOT_CONFIGURED'?'not_configured':'failed',error:e.code||'AI_REVIEW_REQUIRED',updatedAt:Date.now()};});throw error(e.code==='AI_NOT_CONFIGURED'?503:502,e.message);}
 }
-async function listJson(prefix){
-  const {blobs=[]}=await list({prefix,limit:1000});
-  const out=[]; for(const b of blobs){const v=await getJson(b.pathname);if(v)out.push(v)}
-  return out;
-}
-const ipHash=req=>crypto.createHash("sha256").update(String(req.headers["x-forwarded-for"]||req.socket?.remoteAddress||"").split(",")[0].trim()).digest("hex");
-const query=(req,key)=>new URL(req.url,"https://local").searchParams.get(key)||"";
-const shuffle=a=>{a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
-
-function finalize(session,answers={},extra={}){
-  const qs=QUESTIONS[session.roleKey]||[]; let correct=0; const tags={}; const answerRows=[];
-  for(const q of qs){
-    const selected=Number(answers[q.id]); const ok=selected===q.a; if(ok)correct++;
-    for(const t of q.t){tags[t]??={correct:0,total:0};tags[t].total++;if(ok)tags[t].correct++}
-    answerRows.push({id:q.id,selected:Number.isFinite(selected)?selected:null,correct:ok});
-  }
-  const score=Math.round(correct/Math.max(qs.length,1)*100);
-  const capability=Object.entries(tags).map(([k,v])=>({key:k,label:TRAIT_LABELS[k]||k,score:Math.round(v.correct/v.total*100),correct:v.correct,total:v.total})).sort((a,b)=>b.score-a.score);
-  const band=score>=88?"Strong fit":score>=75?"Fit":score>=60?"Bisa dikembangkan":"Belum cocok";
-  const r=ROLES[session.roleKey];
-  return {submissionId:session.sessionId,sessionId:session.sessionId,inviteToken:session.inviteToken,candidateName:session.candidateName,identity:session.identity,roleKey:session.roleKey,team:r.team,role:r.role,startedAt:session.startedAt,finishedAt:Date.now(),durationSeconds:Math.max(0,Math.round((Date.now()-session.startedAt)/1000)),score,correct,total:qs.length,band,capability,answers:answerRows,securityEvents:session.securityEvents||[],terminated:Boolean(extra.terminated),terminationReason:extra.terminationReason||null};
-}
-
-async function handleInvite(req,res){
-  const token=query(req,"token"); if(!token)return json(res,400,{error:"Token kosong"});
-  const inv=await getJson("invites/"+token+".json"); if(!inv)return json(res,404,{error:"Undangan tidak ditemukan"});
-  if(Date.now()>inv.expiresAt)return json(res,410,{error:"Undangan kedaluwarsa"});
-  const r=ROLES[inv.roleKey]; return json(res,200,{candidateName:inv.candidateName,roleKey:inv.roleKey,team:r.team,role:r.role,duration:inv.duration,status:inv.status});
-}
-async function handleStart(req,res){
-  const {token,identity={}}=body(req); const inv=await getJson("invites/"+token+".json");
-  if(!inv)return json(res,404,{error:"Undangan tidak ditemukan"});
-  if(Date.now()>inv.expiresAt)return json(res,410,{error:"Undangan kedaluwarsa"});
-  if(inv.status!=="ready")return json(res,409,{error:"Undangan sudah digunakan / tes sudah dimulai"});
-  const role=ROLES[inv.roleKey]; if(!role)return json(res,400,{error:"Role invalid"});
-  const sessionId=uid(20),now=Date.now();
-  const session={sessionId,inviteToken:token,roleKey:inv.roleKey,candidateName:inv.candidateName||String(identity.name||"").trim(),identity:{name:String(identity.name||inv.candidateName||"").trim(),contact:String(identity.contact||"").trim(),currentRole:String(identity.currentRole||"").trim()},duration:inv.duration,startedAt:now,expiresAt:now+inv.duration*60000,status:"active",securityEvents:[],ipHash:ipHash(req),userAgent:String(req.headers["user-agent"]||"")};
-  inv.status="started";inv.sessionId=sessionId;inv.startedAt=now;
-  await Promise.all([putJson("sessions/"+sessionId+".json",session),putJson("invites/"+token+".json",inv)]);
-  return json(res,200,{sessionId,roleKey:inv.roleKey,team:role.team,role:role.role,duration:inv.duration,startedAt:now,expiresAt:session.expiresAt,candidateName:session.candidateName});
-}
-async function handleQuiz(req,res){
-  const sessionId=query(req,"session"),s=await getJson("sessions/"+sessionId+".json");
-  if(!s||s.status!=="active")return json(res,403,{error:"Session tidak aktif"});
-  if(Date.now()>s.expiresAt)return json(res,410,{error:"Waktu tes habis"});
-  const questions=shuffle(QUESTIONS[s.roleKey]||[]).map(q=>({id:q.id,q:q.q,options:shuffle(q.o.map((text,id)=>({id,text})))}));
-  const r=ROLES[s.roleKey]; return json(res,200,{roleKey:s.roleKey,team:r.team,role:r.role,questions,expiresAt:s.expiresAt});
-}
-async function closeSession(req,res,terminated){
-  const {sessionId,answers={},type}=body(req),s=await getJson("sessions/"+sessionId+".json");
-  if(!s)return json(res,404,{error:"Session tidak ditemukan"});
-  if(s.status!=="active")return json(res,200,{ok:true,already:true});
-  if(terminated)s.securityEvents.push({type:type||"security_violation",at:Date.now()});
-  const timedOut=Date.now()>s.expiresAt;
-  const result=finalize(s,answers,{terminated:terminated||timedOut,terminationReason:terminated?(type||"security_violation"):(timedOut?"time_expired":null)});
-  s.status=result.terminated?"terminated":"completed";s.finishedAt=result.finishedAt;
-  const inv=await getJson("invites/"+s.inviteToken+".json"); if(inv){inv.status="completed";inv.completedAt=result.finishedAt}
-  await Promise.all([putJson("sessions/"+sessionId+".json",s),putJson("submissions/"+sessionId+".json",result),inv?putJson("invites/"+s.inviteToken+".json",inv):Promise.resolve()]);
-  return json(res,200,{ok:true});
-}
-async function handleAdminLogin(req,res){
-  const {password}=body(req);
-  if(!process.env.ADMIN_PASSWORD)return json(res,500,{error:"ADMIN_PASSWORD belum diset"});
-  if(String(password)!==String(process.env.ADMIN_PASSWORD))return json(res,401,{error:"Password salah"});
-  res.setHeader("Set-Cookie","ansena_admin=ok."+sign("ok")+"; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800");
-  return json(res,200,{ok:true});
-}
-async function handleAdminInvite(req,res){
-  if(!requireAdmin(req,res))return;
-  const {candidateName,roleKey,duration,expiresHours}=body(req);
-  if(!String(candidateName||"").trim())return json(res,400,{error:"Nama kandidat wajib"});
-  if(!ROLES[roleKey])return json(res,400,{error:"Role invalid"});
-  const token=uid(18),now=Date.now();
-  const invite={token,candidateName:String(candidateName).trim(),roleKey,duration:Math.max(5,Math.min(90,Number(duration)||ROLES[roleKey].duration)),createdAt:now,expiresAt:now+Math.max(1,Math.min(720,Number(expiresHours)||168))*3600000,status:"ready"};
-  await putJson("invites/"+token+".json",invite); return json(res,200,{invite});
-}
-async function handleAdminSubmissions(req,res){
-  if(!requireAdmin(req,res))return;
-  const id=query(req,"id");
-  if(id){const submission=await getJson("submissions/"+id+".json");if(!submission)return json(res,404,{error:"Tidak ditemukan"});const review=await getJson("reviews/"+id+".json");return json(res,200,{submission,review})}
-  const all=await listJson("submissions/");all.sort((a,b)=>b.finishedAt-a.finishedAt);
-  return json(res,200,{submissions:all.map(x=>({submissionId:x.submissionId,candidateName:x.candidateName,identity:x.identity,team:x.team,role:x.role,roleKey:x.roleKey,score:x.score,band:x.band,finishedAt:x.finishedAt,terminated:x.terminated,terminationReason:x.terminationReason,securityEvents:x.securityEvents}))});
-}
-async function handleAdminReview(req,res){
-  if(!requireAdmin(req,res))return;
-  const {submissionId,ratings={},notes=""}=body(req);if(!submissionId)return json(res,400,{error:"submissionId kosong"});
-  const review={submissionId,ratings,notes:String(notes),updatedAt:Date.now()};await putJson("reviews/"+submissionId+".json",review);return json(res,200,{ok:true,review});
-}
-
 export default async function handler(req,res){
-  try{
-    const action=query(req,"action");
-    if(action==="invite"&&req.method==="GET")return handleInvite(req,res);
-    if(action==="start"&&req.method==="POST")return handleStart(req,res);
-    if(action==="quiz"&&req.method==="GET")return handleQuiz(req,res);
-    if(action==="submit"&&req.method==="POST")return closeSession(req,res,false);
-    if(action==="violation"&&req.method==="POST")return closeSession(req,res,true);
-    if(action==="admin-me")return json(res,200,{authenticated:isAdmin(req)});
-    if(action==="admin-login"&&req.method==="POST")return handleAdminLogin(req,res);
-    if(action==="admin-logout"&&req.method==="POST"){res.setHeader("Set-Cookie","ansena_admin=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0");return json(res,200,{ok:true})}
-    if(action==="admin-config"){if(!requireAdmin(req,res))return;return json(res,200,{roles:ROLES,traits:CAPABILITY_TRAITS,weights:ROLE_TRAIT_WEIGHTS})}
-    if(action==="admin-invite"&&req.method==="POST")return handleAdminInvite(req,res);
-    if(action==="admin-submissions")return handleAdminSubmissions(req,res);
-    if(action==="admin-review"&&req.method==="POST")return handleAdminReview(req,res);
-    return json(res,404,{error:"Unknown action"});
-  }catch(e){console.error(e);return json(res,500,{error:"Server error",detail:process.env.NODE_ENV==="development"?String(e?.message||e):undefined})}
+ res.setHeader('Cache-Control','no-store');
+ try{
+ const action=query(req,'action');const method=req.method;
+ if(method==='POST'&&req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)throw error(403,'Origin tidak diizinkan');
+ if(action==='health'&&method==='GET')return response(res,200,{version:VERSION,status:'ok',pilot:true});
+ if(action==='admin-me'&&method==='GET')return response(res,200,{authenticated:isAdmin(req)});
+ if(action==='admin-login'&&method==='POST'){const{password}=body(req);if(!process.env.ADMIN_PASSWORD)throw error(503,'Login admin belum dikonfigurasi');if(!equal(password,process.env.ADMIN_PASSWORD))throw error(401,'Password salah');const exp=String(Date.now()+28800000);res.setHeader('Set-Cookie',`ansena_admin=${exp}.${sign(exp)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800`);return response(res,200,{ok:true});}
+ if(action==='admin-logout'&&method==='POST'){res.setHeader('Set-Cookie','ansena_admin=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');return response(res,200,{ok:true});}
+ if(action.startsWith('admin-')){
+ admin(req);
+ if(action==='admin-config'&&method==='GET'){const ai=await aiConfig();return response(res,200,{roles:ROLES,caps:CAPS,weights:WEIGHTS,pilot:PILOT,duration:DURATION,ai:{configured:!!ai.key,model:ai.model},bank:questionsFor('pre')});}
+ if(action==='admin-bank'&&method==='GET'){const qs=questionsFor(query(req,'stage'));if(!qs)throw error(400,'Tahap tidak valid');return response(res,200,{questions:qs});}
+ if(action==='admin-ai'&&method==='POST'){const{apiKey,model}=body(req);if(typeof apiKey!=='string'||!apiKey.startsWith('sk-')||apiKey.length>300)throw error(400,'API key tidak valid');if(model&&(!/^[a-zA-Z0-9._-]{1,80}$/.test(model)))throw error(400,'Model tidak valid');const cfg={encryptedKey:encrypt(apiKey),model:model||'gpt-4o-mini',updatedAt:Date.now()};await write('settings/v2-ai.json',cfg);return response(res,200,{ok:true});}
+ if(action==='admin-invite'&&method==='POST'){const b=body(req);const name=String(b.candidateName||'').trim();if(!name||name.length>150)throw error(400,'Nama kandidat wajib (maks. 150 karakter)');const token=uid(),now=Date.now();const duration=Number(b.duration)||DURATION.pre;if(duration<10||duration>120)throw error(400,'Durasi 10–120 menit');const hours=Number(b.expiresHours)||168;if(hours<1||hours>720)throw error(400,'Batas undangan 1–720 jam');const r={token,version:VERSION,candidateName:name,createdAt:now,expiresAt:now+hours*3600000,duration,preferences:[],stages:{},profileStatus:'not_set',materialRead:{},notes:''};await write(path(token),r,null,{create:true});return response(res,200,{token});}
+ if(action==='admin-submissions'&&method==='GET'){const id=query(req,'id');if(id){const r=await record(id);return response(res,200,{record:r,roleResults:finalRoleResults(r),routing:r.stages.pre?.result?routing(r.stages.pre.result,r.preferences):null});}
+ const records=await listValues('assessments/v2/');const legacy=await listValues('submissions/');return response(res,200,{records:records.sort((a,b)=>b.createdAt-a.createdAt).map(r=>({token:r.token,candidateName:r.candidateName,createdAt:r.createdAt,preferences:r.preferences,stages:candidateSummary(r).stages,shortlist:candidateSummary(r).shortlist,profileStatus:r.profileStatus,reviewRequired:Object.values(r.stages).some(s=>s.reviewRequired)})),legacy:legacy.map(r=>({submissionId:r.submissionId,candidateName:r.candidateName,role:r.role,team:r.team,score:r.score,finishedAt:r.finishedAt}))});}
+ if(action==='admin-grade'&&method==='POST'){const{token,stage}=body(req);await evaluate(token,stage);return response(res,200,{ok:true});}
+ if(action==='admin-notes'&&method==='POST'){const{token,notes}=body(req);if(typeof notes!=='string'||notes.length>5000)throw error(400,'Catatan terlalu panjang');await mutate(path(token),r=>{r.notes=notes;r.notesUpdatedAt=Date.now();});return response(res,200,{ok:true});}
+ if(action==='admin-review'&&method==='POST'){const{token,stage,grades,reason}=body(req);if(typeof reason!=='string'||!reason.trim())throw error(400,'Alasan override wajib');const{validateGrades}=await import('../lib/grading.js');await mutate(path(token),r=>{const s=r.stages[stage];if(!s||!['submitted','terminated'].includes(s.status))throw error(409,'Tahap belum dikirim');if(s.grading?.status==='running'&&s.grading.expiresAt>Date.now())throw error(409,'Tunggu penilaian AI selesai');if(stage==='pre'&&Object.keys(r.stages).some(k=>k!=='pre'))throw error(409,'Review pre-assessment harus selesai sebelum pendalaman dimulai');const qs=questionsFor(stage).filter(q=>q.type==='essay'&&s.answers[q.id]?.trim());const checked=validateGrades(qs,{grades},s.answers);s.reviewHistory??=[];s.reviewHistory.push({at:Date.now(),reason,previousGrades:s.grades||[],previousGrading:s.grading});s.grades=checked;s.result=aggregate(stage,s.answers,checked);s.grading={status:'complete',method:'manual_exception',gradedAt:Date.now()};s.reviewRequired=false;});return response(res,200,{ok:true});}
+ throw error(404,'Aksi admin tidak ditemukan');
+ }
+ const b=method==='POST'?body(req):{};const token=safeToken(b.token||query(req,'token'));
+ if(action==='invite'&&method==='GET'){const r=await record(token);if(Date.now()>r.expiresAt&&!r.stages.pre)throw error(410,'Undangan kedaluwarsa');return response(res,200,{...candidateSummary(r),duration:r.duration,roles:ROLES,expiresAt:r.expiresAt});}
+ if(action==='start'&&method==='POST'){const stage=b.stage||'pre';await mutate(path(token),r=>{allowed(r,stage);if(r.stages[stage])throw error(409,'Tahap ini sudah dimulai; hanya satu kesempatan');if(stage==='pre'){if(Date.now()>r.expiresAt)throw error(410,'Undangan kedaluwarsa');if(!b.identity?.name?.trim()||!b.identity?.contact?.trim())throw error(400,'Nama dan kontak wajib');r.identity={name:String(b.identity.name).trim().slice(0,150),contact:String(b.identity.contact).trim().slice(0,200),currentRole:String(b.identity.currentRole||'').trim().slice(0,200)};r.candidateName=r.identity.name;const prefs=b.preferences;if(!Array.isArray(prefs)||!prefs.length||prefs.length>8||prefs.some(x=>!ROLES[x]))throw error(400,'Pilih minimal satu posisi');r.preferences=[...new Set(prefs)];r.aiConsent=true;}
+ const minutes=stage==='pre'?r.duration:DURATION[stage.split(':')[0]];r.stages[stage]={status:'active',startedAt:Date.now(),expiresAt:Date.now()+minutes*60000,answers:{},revision:0,securityEvents:[]};});const r=await record(token);return response(res,200,{questions:publicQuestions(stage),expiresAt:r.stages[stage].expiresAt,stage});}
+ if(action==='quiz'&&method==='GET'){const stage=query(req,'stage')||'pre';const r=await record(token);allowed(r,stage);const s=active(r,stage);return response(res,200,{questions:publicQuestions(stage),answers:s.answers,revision:s.revision,expiresAt:s.expiresAt,stage});}
+ if(action==='save'&&method==='POST'){const stage=b.stage;const answers=validateAnswers(stage,b.answers,{partial:true});await mutate(path(token),r=>{const s=active(r,stage);if(Date.now()>s.expiresAt)throw error(410,'Waktu tes habis');if(!Number.isInteger(b.revision)||b.revision<=s.revision)return;s.answers=answers;s.revision=b.revision;s.savedAt=Date.now();});return response(res,200,{ok:true,savedAt:Date.now()});}
+ if(['submit','violation'].includes(action)&&method==='POST'){const stage=b.stage;let answers=validateAnswers(stage,b.answers||{},{partial:action==='violation'});await mutate(path(token),r=>{const s=r.stages[stage];if(!s)throw error(404,'Tahap tidak ditemukan');if(s.status!=='active')return;const expired=Date.now()>s.expiresAt+2000;const terminated=action==='violation'||expired;const reason=expired?'time_expired':String(b.type||'security_violation').slice(0,80);if(expired)answers=s.answers;s.answers=answers;s.status=terminated?'terminated':'submitted';s.submittedAt=Date.now();if(terminated){s.terminationReason=reason;s.securityEvents.push({type:reason,at:Date.now()});}s.result=aggregate(stage,answers);s.grading={status:s.result.complete?'complete':'pending'};s.reviewRequired=terminated;});return response(res,200,{ok:true,summary:candidateSummary(await record(token))});}
+ if(action==='evaluate'&&method==='POST'){await evaluate(token,b.stage);return response(res,200,{ok:true});}
+ if(action==='profile'&&method==='POST'){await mutate(path(token),r=>{if(r.stages.pre?.status!=='submitted')throw error(409,'Selesaikan pre-assessment dahulu');r.profile=b.skip?{}:cleanProfile(b.profile||{});r.profileStatus=b.skip?'skipped':'saved';r.profileUpdatedAt=Date.now();});return response(res,200,{ok:true});}
+ if(action==='materials'&&method==='GET'){const r=await record(token);const role=query(req,'role');if(r.stages.pre?.status!=='submitted'||!routing(r.stages.pre?.result||{complete:false},r.preferences).shortlist.some(x=>x.roleKey===role))throw error(403,'Posisi tidak tersedia');return response(res,200,{common:COMMON_HANDBOOK,module:HANDBOOK[role],role:ROLES[role]});}
+ if(action==='materials-read'&&method==='POST'){await mutate(path(token),r=>{if(r.stages.pre?.status!=='submitted'||!routing(r.stages.pre?.result||{complete:false},r.preferences).shortlist.some(x=>x.roleKey===b.role))throw error(403,'Posisi tidak tersedia');r.materialRead[b.role]=Date.now();});return response(res,200,{ok:true});}
+ throw error(404,'Aksi tidak ditemukan');
+ }catch(e){const status=e.status||(e instanceof Conflict?409:500);if(status===500)console.error('assessment_error',e.name,e.code||'');return response(res,status,{error:status===500?'Terjadi kendala server. Coba lagi; data yang sudah tersimpan tetap tersedia.':e.message});}
 }

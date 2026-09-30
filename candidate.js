@@ -1,116 +1,37 @@
 const $=s=>document.querySelector(s);
-const api=async(action,opt={})=>{
-  const r=await fetch("/api/index?action="+action,opt);
-  let j={}; try{j=await r.json()}catch{}
-  if(!r.ok) throw new Error(j.error||"Terjadi kesalahan");
-  return j;
-};
-let invite=null,sessionId=null,quiz=null,answers={},active=false,finished=false,armAt=0,timerHandle=null;
-
-function tokenFrom(v){
-  v=String(v||"").trim();
-  const m=v.match(/[?&]invite=([^&]+)/);
-  return m?decodeURIComponent(m[1]):v;
-}
-function msg(el,text,cls="danger"){el.innerHTML="<p class='"+cls+"'>"+String(text).replace(/[<>&]/g,m=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[m]))+"</p>"}
-async function loadInvite(token){
-  invite=await api("invite&token="+encodeURIComponent(token));
-  $("#landing").classList.add("hidden");
-  $("#gate").classList.remove("hidden");
-  $("#gateName").textContent=invite.candidateName||"Candidate";
-  $("#gateRole").textContent=invite.team+" · "+invite.role;
-  $("#gateMeta").textContent="Durasi "+invite.duration+" menit · Status undangan: "+invite.status;
-  $("#identityName").value=invite.candidateName||"";
-}
-$("#openInvite").onclick=()=>loadInvite(tokenFrom($("#inviteInput").value)).catch(e=>msg($("#landingMsg"),e.message));
-const direct=new URLSearchParams(location.search).get("invite"); if(direct) loadInvite(direct).catch(e=>msg($("#landingMsg"),e.message));
-
-function lockPage(){
-  document.body.classList.add("no-select");
-  ["copy","cut","paste","contextmenu","selectstart","dragstart"].forEach(ev=>document.addEventListener(ev,e=>{if(active)e.preventDefault()}));
-  document.addEventListener("keydown",e=>{
-    if(!active)return;
-    const k=e.key.toLowerCase(), mod=e.ctrlKey||e.metaKey;
-    if(e.key==="F12"||e.key==="PrintScreen"||(mod&&["c","v","x","a","p","s","u","r"].includes(k))){e.preventDefault();e.stopPropagation()}
-  },true);
-}
-lockPage();
-
-async function enterFullscreen(){
-  if(!document.fullscreenElement){
-    if(!document.documentElement.requestFullscreen) throw new Error("Browser ini tidak mendukung fullscreen wajib. Gunakan Chrome/Edge desktop.");
-    await document.documentElement.requestFullscreen();
-  }
-}
-$("#startBtn").onclick=async()=>{
-  try{
-    if(!invite) throw new Error("Undangan belum dimuat.");
-    if(!$("#identityName").value.trim()) throw new Error("Nama lengkap wajib diisi.");
-    await enterFullscreen();
-    const r=await api("start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-      token:tokenFrom(direct||$("#inviteInput").value),
-      identity:{name:$("#identityName").value.trim(),contact:$("#identityContact").value.trim(),currentRole:$("#identityCurrentRole").value.trim()}
-    })});
-    sessionId=r.sessionId;
-    sessionStorage.setItem("ansena_session",sessionId);
-    quiz=await api("quiz&session="+encodeURIComponent(sessionId));
-    active=true; armAt=Date.now()+1500;
-    $("#gate").classList.add("hidden"); $("#exam").classList.remove("hidden");
-    $("#examRole").textContent=quiz.team+" · "+quiz.role;
-    $("#examCandidate").textContent=r.candidateName||$("#identityName").value.trim();
-    renderQuiz(); startTimer(quiz.expiresAt);
-  }catch(e){
-    try{if(document.fullscreenElement)await document.exitFullscreen()}catch{}
-    msg($("#gateMsg"),e.message);
-  }
-};
-
-function renderQuiz(){
-  $("#questions").innerHTML=quiz.questions.map((q,i)=>{
-    const opts=q.options.map(o=>"<label class='option'><input type='radio' name='"+q.id+"' value='"+o.id+"'>"+(String.fromCharCode(65+q.options.indexOf(o)))+". "+esc(o.text)+"</label>").join("");
-    return "<section class='card question'><div class='small muted'>QUESTION "+(i+1)+" / "+quiz.questions.length+"</div><h3>"+esc(q.q)+"</h3>"+opts+"</section>";
-  }).join("");
-  document.querySelectorAll("#questions input").forEach(inp=>inp.onchange=()=>{
-    answers[inp.name]=Number(inp.value); updateProgress();
-  });
-  updateProgress();
-}
-function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m]))}
-function updateProgress(){
-  const n=Object.keys(answers).length,total=quiz?.questions.length||1;
-  $("#progress").style.width=Math.round(n/total*100)+"%";
-  $("#answered").textContent=n+" dari "+total+" dijawab";
-}
-function startTimer(expiresAt){
-  const tick=()=>{
-    const ms=Math.max(0,expiresAt-Date.now());
-    const sec=Math.ceil(ms/1000),m=Math.floor(sec/60),s=sec%60;
-    $("#timer").textContent=String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
-    if(ms<=0){clearInterval(timerHandle);submit(true,"time_expired")}
-  };
-  tick(); timerHandle=setInterval(tick,500);
-}
-$("#submitBtn").onclick=()=>submit(false,null);
-
-async function submit(terminated,reason){
-  if(finished||!sessionId)return;
-  finished=true; active=false; clearInterval(timerHandle);
-  try{
-    const endpoint=terminated?"violation":"submit";
-    await api(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId,answers,type:reason||undefined})});
-  }catch{}
-  try{if(document.fullscreenElement)await document.exitFullscreen()}catch{}
-  $("#exam").classList.add("hidden"); $("#finished").classList.remove("hidden");
-  $("#finishTitle").textContent=terminated?"Assessment diakhiri":"Assessment selesai";
-  $("#finishText").textContent=terminated?"Sistem mendeteksi pelanggaran mode tes ("+(reason||"security")+"). Jawaban sampai titik ini telah tersimpan.":"Jawaban sudah tersimpan. Hasil akan dilihat oleh admin.";
-  sessionStorage.removeItem("ansena_session");
-}
-function shouldTerminate(){return active&&!finished&&Date.now()>=armAt}
-document.addEventListener("visibilitychange",()=>{if(document.hidden&&shouldTerminate())submit(true,"tab_or_app_switch")});
-window.addEventListener("blur",()=>{if(shouldTerminate())setTimeout(()=>{if(shouldTerminate()&&!document.hasFocus())submit(true,"window_focus_lost")},180)});
-document.addEventListener("fullscreenchange",()=>{if(shouldTerminate()&&!document.fullscreenElement)submit(true,"fullscreen_exit")});
-window.addEventListener("pagehide",()=>{
-  if(!shouldTerminate()||!sessionId)return;
-  const data=JSON.stringify({sessionId,answers,type:"page_exit"});
-  navigator.sendBeacon("/api/index?action=violation",new Blob([data],{type:"application/json"}));
-});
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+const label=k=>k==='pre'?'Pre-assessment universal':(k.startsWith('post:')?'Post-test':'Practical');
+let token=new URLSearchParams(location.search).get('invite')||sessionStorage.getItem('ccpw_token')||'',state=null,stage=null,quiz=null,answers={},revision=0,active=false,closed=false,armed=0,timer=null,saveTimer=null,saving=Promise.resolve(),closing=false,retryPayload=null;
+async function api(action,data,params={}){const url='/api/index?'+new URLSearchParams({action,token,...params});const r=await fetch(url,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,...data})}:{});let j;try{j=await r.json();}catch{throw new Error('Koneksi bermasalah; coba lagi.');}if(!r.ok)throw new Error(j.error||'Terjadi kendala');return j;}
+function message(id,text,ok=false){const el=$(id);if(el){el.textContent=text;el.className=ok?'success small':'danger small';}}
+function loading(text='Memuat…'){$('#app').innerHTML='<section class="card hero"><h1>'+esc(text)+'</h1></section>';}
+function landing(){$('#app').innerHTML='<section class="card hero"><span class="tag">ASSESSMENT KANDIDAT</span><h1>Temukan peran<br>yang cocok untukmu.</h1><p>Satu pre-assessment untuk memetakan kemampuan ke delapan posisi Corporate Communications dan People &amp; Workplace.</p><div class="journey"><span>01 · Pre-assessment</span><span>02 · Materi</span><span>03 · Post-test</span><span>04 · Practical</span></div><div class="field"><label for="inviteInput">LINK / KODE UNDANGAN</label><input id="inviteInput" placeholder="Tempel undangan dari admin" autocomplete="off"></div><button class="btn blue" id="openInvite">Buka undangan</button><p id="landingMsg" role="status"></p></section>';$('#openInvite').onclick=()=>{let v=$('#inviteInput').value.trim();try{if(v.includes('://'))v=new URL(v).searchParams.get('invite')||'';}catch{}token=v;refresh().catch(e=>message('#landingMsg',e.message));};}
+async function refresh(){state=await api('invite');sessionStorage.setItem('ccpw_token',token);const pre=state.stages.pre;if(!pre)return gate();const running=Object.entries(state.stages).find(([,s])=>s.status==='active');if(running){stage=running[0];quiz=await api('quiz',null,{stage});answers=quiz.answers||{};revision=quiz.revision||0;return restorePrompt();}if(pre.status==='submitted'&&state.profileStatus==='not_set')return profile();dashboard();}
+function gate(){const roles=Object.entries(state.roles).map(([k,r])=>'<label class="option role-option"><input type="checkbox" name="preference" value="'+k+'"><span>'+esc(r.team)+'<b>'+esc(r.role)+'</b></span></label>').join('');$('#app').innerHTML='<section class="card hero"><span class="tag">32 SOAL · '+state.duration+' MENIT</span><h1>Halo, '+esc(state.candidateName)+'.</h1><p>24 situasi kerja, 4 esai singkat, dan 4 kasus lintas posisi. Pilihan posisi menunjukkan minatmu; penilaian tetap mencakup semua posisi.</p><div class="grid"><div class="field"><label for="name">NAMA LENGKAP</label><input id="name" maxlength="150" value="'+esc(state.candidateName)+'"></div><div class="field"><label for="contact">EMAIL / NO. HP</label><input id="contact" maxlength="200"></div></div><div class="field"><label for="currentRole">POSISI SAAT INI · OPSIONAL</label><input id="currentRole" maxlength="200"></div><h3>Posisi yang kamu minati</h3><div class="grid">'+roles+'</div><div class="spacer"></div>'+rules()+'<label class="option"><input type="checkbox" id="consent"> Saya memahami aturan tes dan setuju jawaban kerja dikirim ke layanan AI untuk penilaian berbasis rubrik. Profil personal tidak ikut dinilai.</label><button class="btn blue" id="start">Masuk fullscreen &amp; mulai</button><p id="gateMsg" role="status"></p></section>';$('#start').onclick=()=>start('pre');}
+function rules(){return '<div class="warning small"><b>Aturan tes:</b> gunakan Chrome/Edge desktop yang mendukung fullscreen. Setelah mulai, keluar fullscreen, pindah tab/aplikasi, atau kehilangan fokus mengakhiri kesempatan tes. Copy/paste dan shortcut tertentu dibatasi. Jawaban disimpan berkala. Saat waktu habis, tes ditutup. Materi dibaca di luar mode tes.</div>';}
+async function fullscreen(){if(!document.fullscreenElement){if(!document.documentElement.requestFullscreen)throw new Error('Gunakan browser desktop yang mendukung fullscreen.');await document.documentElement.requestFullscreen();}}
+async function start(nextStage){const btn=$('#start');if(btn)btn.disabled=true;try{const data={stage:nextStage};if(nextStage==='pre'){data.identity={name:$('#name').value.trim(),contact:$('#contact').value.trim(),currentRole:$('#currentRole').value.trim()};data.preferences=[...document.querySelectorAll('[name=preference]:checked')].map(x=>x.value);if(!data.identity.name||!data.identity.contact||!data.preferences.length||!$('#consent').checked)throw new Error('Isi nama dan kontak, pilih posisi, lalu setujui aturan tes.');}await fullscreen();quiz=await api('start',data);stage=nextStage;answers={};revision=0;renderExam();}catch(e){active=false;try{if(document.fullscreenElement)await document.exitFullscreen();}catch{}message('#gateMsg',e.message);if(btn)btn.disabled=false;}}
+function restorePrompt(){$('#app').innerHTML='<section class="card hero"><h1>Tes sudah dimulai.</h1><p>Waktu terus berjalan. Masuk fullscreen untuk melanjutkan sesi yang sama.</p>'+rules()+'<button id="restore" class="btn blue">Lanjutkan sesi</button><p id="gateMsg"></p></section>';$('#restore').onclick=async()=>{try{await fullscreen();renderExam();}catch(e){message('#gateMsg',e.message);}};}
+function renderExam(){active=true;closed=false;closing=false;armed=Date.now()+1500;document.body.classList.add('no-select');$('#app').innerHTML='<section><div class="test-head"><div class="row between"><div><b>'+esc(label(stage))+'</b><div class="small muted">'+esc(state.candidateName)+'</div></div><div id="timer" class="timer"></div></div><div class="progressbar"><div id="progress"></div></div><div class="small muted" id="saveState">Jawaban akan disimpan berkala.</div></div><div id="questions">'+quiz.questions.map((q,i)=>'<section class="card question"><div class="small muted">'+(i+1)+' / '+quiz.questions.length+' · '+(q.type==='essay'?'ESAI SINGKAT':'SITUASI KERJA')+'</div><h3>'+esc(q.q)+'</h3>'+(q.type==='sjt'?q.options.map(o=>'<label class="option"><input type="radio" name="'+q.id+'" value="'+o.id+'" '+(answers[q.id]===o.id?'checked':'')+'>'+esc(o.text)+'</label>').join(''):'<textarea aria-label="Jawaban soal '+(i+1)+'" data-question="'+q.id+'" maxlength="'+q.maxLength+'" placeholder="Jelaskan langkah dan alasanmu…">'+esc(answers[q.id]||'')+'</textarea><div class="small muted">Maksimal '+q.maxLength+' karakter.</div>')+'</section>').join('')+'</div><div class="card"><div class="row between"><span id="answered"></span><button id="submit" class="btn blue">Kirim jawaban</button></div><p id="examMsg" role="status"></p></div></section>';
+ document.querySelectorAll('#questions input').forEach(el=>el.onchange=()=>{answers[el.name]=Number(el.value);changed();});document.querySelectorAll('#questions textarea').forEach(el=>el.oninput=()=>{answers[el.dataset.question]=el.value;changed();});$('#submit').onclick=()=>close(false);progress();clearInterval(timer);timer=setInterval(tick,500);tick();}
+function progress(){const n=quiz.questions.filter(q=>q.type==='sjt'?Number.isInteger(answers[q.id]):!!answers[q.id]?.trim()).length;$('#answered').textContent=n+' dari '+quiz.questions.length+' dijawab';$('#progress').style.width=n/quiz.questions.length*100+'%';}
+function changed(){revision++;progress();clearTimeout(saveTimer);saveTimer=setTimeout(()=>save(),800);}
+function save(){if(!active)return saving;const snapshot=structuredClone(answers),rev=revision,current=stage;message('#saveState','Menyimpan…',true);saving=saving.catch(()=>{}).then(async()=>{try{await api('save',{stage:current,answers:snapshot,revision:rev});message('#saveState','Tersimpan · '+new Date().toLocaleTimeString('id-ID'),true);}catch(e){message('#saveState','Belum tersimpan: '+e.message);}});return saving;}
+function tick(){if(!active)return;const secs=Math.max(0,Math.ceil((quiz.expiresAt-Date.now())/1000));$('#timer').textContent=String(Math.floor(secs/60)).padStart(2,'0')+':'+String(secs%60).padStart(2,'0');if(!secs)close(true,'time_expired');}
+async function close(violation,reason){if(closing||closed)return;if(!violation){const n=quiz.questions.filter(q=>q.type==='sjt'?Number.isInteger(answers[q.id]):!!answers[q.id]?.trim()).length;if(n!==quiz.questions.length)return message('#examMsg','Jawab seluruh pertanyaan sebelum mengirim.');}
+ closing=true;active=false;clearInterval(timer);clearTimeout(saveTimer);document.body.classList.remove('no-select');const payload={stage,answers:structuredClone(answers),type:reason};retryPayload={action:violation?'violation':'submit',payload};try{await saving;await api(retryPayload.action,payload);closed=true;retryPayload=null;try{if(document.fullscreenElement)await document.exitFullscreen();}catch{}await refresh();}catch(e){try{if(document.fullscreenElement)await document.exitFullscreen();}catch{}$('#app').innerHTML='<section class="card hero"><h1>Jawaban belum terkirim.</h1><p id="retryMsg">'+esc(e.message)+'</p><p>Jawaban sesi ini masih ada di halaman. Jangan tutup halaman sebelum mencoba lagi.</p><button id="retry" class="btn blue">Coba kirim lagi</button></section>';$('#retry').onclick=async()=>{try{await api(retryPayload.action,retryPayload.payload);closed=true;retryPayload=null;await refresh();}catch(e){message('#retryMsg',e.message);}};}finally{closing=false;}}
+const profileFields={interests:'Minat',talents:'Bakat',education:'Pendidikan',reading:'Bacaan',hobbies:'Hobi',learningInterests:'Hal yang ingin dipelajari',mbti:'MBTI',zodiac:'Zodiak',rolePreferences:'Catatan preferensi posisi',english:'English · ceritakan kemampuanmu bila ingin'};
+function profile(){$('#app').innerHTML='<section class="card hero"><span class="tag">OPSIONAL · TIDAK DINILAI</span><h1>Kenalan lebih lanjut.</h1><p>Jawaban pre-assessment sudah tersimpan. Kamu boleh mengisi profil ini atau melewatinya. Seluruh profil, termasuk English, tidak memengaruhi skor, ranking, kecocokan posisi maupun kelulusan.</p><div class="grid">'+Object.entries(profileFields).map(([k,v])=>'<div class="field"><label for="profile-'+k+'">'+esc(v)+'</label><textarea id="profile-'+k+'" maxlength="2000" class="profile-input"></textarea></div>').join('')+'</div><div class="row"><button id="saveProfile" class="btn blue">Simpan &amp; lanjut</button><button id="skipProfile" class="btn">Lewati</button></div><p id="profileMsg"></p></section>';$('#saveProfile').onclick=()=>saveProfile(false);$('#skipProfile').onclick=()=>saveProfile(true);}
+async function saveProfile(skip){const p=Object.fromEntries(Object.keys(profileFields).map(k=>[k,$('#profile-'+k).value]));try{await api('profile',{skip,profile:p});await refresh();grade('pre');}catch(e){message('#profileMsg',e.message);}}
+function dashboard(){const pre=state.stages.pre;const terminated=pre.status==='terminated';$('#app').innerHTML='<section class="card hero"><span class="tag">'+(terminated?'TES DIAKHIRI':'PROGRES ASSESSMENT')+'</span><h1>'+esc(state.candidateName)+'</h1><p>'+(terminated?'Pre-assessment diakhiri: '+esc(pre.terminationReason)+'. Jawaban yang diterima tersimpan untuk review admin.':'Pre-assessment tersimpan. Pendalaman tersedia setelah penilaian selesai. Materi dapat dibaca di waktu luang; post-test dan practical memakai mode tes.')+'</p><p id="statusMsg"></p><button id="refresh" class="btn">Periksa status</button> '+(!terminated&&pre.grading!=='complete'?'<button id="gradePre" class="btn blue">Proses penilaian</button>':'')+'</section><div class="spacer"></div>'+(!terminated&&state.shortlist.length?'<div class="grid">'+state.shortlist.map(r=>{const post=state.stages['post:'+r.roleKey],practical=state.stages['practical:'+r.roleKey];const done=post?.status==='submitted'&&post.grading==='complete';return '<section class="card"><span class="tag">'+esc(r.team)+'</span><h2>'+esc(r.role)+'</h2><p class="small muted">'+(r.applied?'Posisi yang kamu minati':'Potensi posisi lain')+'</p><button class="btn" data-material="'+r.roleKey+'">Baca materi</button><div class="hr"></div><p>Post-test: '+esc(post?.status||'Belum dimulai')+'</p>'+(!post?'<button class="btn blue" data-post="'+r.roleKey+'">Mulai post-test</button>':post.status==='submitted'&&post.grading!=='complete'?'<button class="btn" data-grade="post:'+r.roleKey+'">Proses nilai post-test</button>':'')+'<p>Practical: '+esc(practical?.status||'Belum dimulai')+'</p>'+(done&&!practical?'<button class="btn blue" data-practical="'+r.roleKey+'">Mulai practical</button>':practical?.status==='submitted'&&practical.grading!=='complete'?'<button class="btn" data-grade="practical:'+r.roleKey+'">Proses nilai practical</button>':'')+'</section>';}).join('')+'</div>':'');$('#refresh').onclick=()=>refresh().catch(e=>message('#statusMsg',e.message));if($('#gradePre'))$('#gradePre').onclick=()=>grade('pre');document.querySelectorAll('[data-material]').forEach(b=>b.onclick=()=>materials(b.dataset.material));document.querySelectorAll('[data-post]').forEach(b=>b.onclick=()=>stageGate('post:'+b.dataset.post));document.querySelectorAll('[data-practical]').forEach(b=>b.onclick=()=>stageGate('practical:'+b.dataset.practical));document.querySelectorAll('[data-grade]').forEach(b=>b.onclick=()=>grade(b.dataset.grade));}
+async function grade(s){message('#statusMsg','Penilaian sedang diproses…',true);document.querySelectorAll('[data-grade],#gradePre').forEach(b=>b.disabled=true);try{await api('evaluate',{stage:s});await refresh();message('#statusMsg','Penilaian selesai.',true);}catch(e){message('#statusMsg',e.message+' Jawaban tetap tersimpan.');document.querySelectorAll('[data-grade],#gradePre').forEach(b=>b.disabled=false);}}
+async function materials(role){try{const m=await api('materials',null,{role});$('#app').innerHTML='<section class="card hero"><span class="tag">MATERI PENDALAMAN</span><h1>'+esc(m.role.role)+'</h1><p>'+esc(m.module.focus)+'</p><h2>Prinsip bersama</h2>'+m.common.map(([h,t])=>'<h3>'+esc(h)+'</h3><p>'+esc(t)+'</p>').join('')+'<h2>Praktik posisi</h2><ol>'+m.module.steps.map(t=>'<li>'+esc(t)+'</li>').join('')+'</ol><h3>Contoh</h3><p>'+esc(m.module.case)+'</p><label class="option"><input id="read" type="checkbox"> Saya sudah membaca dan memahami materi.</label><div class="row"><button id="ack" class="btn blue">Simpan status membaca</button><button id="back" class="btn">Kembali</button></div><p id="materialMsg"></p></section>';$('#back').onclick=refresh;$('#ack').onclick=async()=>{if(!$('#read').checked)return message('#materialMsg','Centang setelah membaca materi.');try{await api('materials-read',{role});await refresh();}catch(e){message('#materialMsg',e.message);}};}catch(e){message('#statusMsg',e.message);}}
+function stageGate(s){const role=s.split(':')[1];$('#app').innerHTML='<section class="card hero"><span class="tag">'+esc(state.roles[role].team)+'</span><h1>'+esc(label(s))+' · '+esc(state.roles[role].role)+'</h1><p>'+(s.startsWith('post:')?'6 soal · 20 menit. Gunakan prinsip dari materi pada kasus baru.':'1 tugas · 15 menit. Tuliskan hasil kerja sesuai brief. Ini practical berbasis teks; kualitas karya visual perlu validasi lanjutan bila relevan.')+'</p>'+rules()+'<div class="spacer"></div><div class="row"><button id="start" class="btn blue">Masuk fullscreen &amp; mulai</button><button id="back" class="btn">Kembali</button></div><p id="gateMsg"></p></section>';$('#start').onclick=()=>start(s);$('#back').onclick=refresh;}
+const shouldClose=()=>active&&!closed&&Date.now()>armed;
+for(const event of ['copy','cut','paste','contextmenu','dragstart'])document.addEventListener(event,e=>{if(active)e.preventDefault();});
+document.addEventListener('keydown',e=>{if(!active)return;const k=e.key.toLowerCase();if(e.key==='F12'||e.key==='PrintScreen'||((e.ctrlKey||e.metaKey)&&['c','v','x','p','s','u','r'].includes(k)))e.preventDefault();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&shouldClose())close(true,'tab_or_app_switch');});
+window.addEventListener('blur',()=>{if(shouldClose())setTimeout(()=>{if(shouldClose()&&!document.hasFocus())close(true,'window_focus_lost');},180);});
+document.addEventListener('fullscreenchange',()=>{if(shouldClose()&&!document.fullscreenElement)close(true,'fullscreen_exit');});
+window.addEventListener('pagehide',()=>{if(shouldClose())navigator.sendBeacon('/api/index?action=violation',new Blob([JSON.stringify({token,stage,answers,type:'page_exit'})],{type:'application/json'}));});
+if(token){loading();refresh().catch(e=>{landing();message('#landingMsg',e.message);});}else landing();
