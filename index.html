@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ansena Capability Assessment</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main class="wrap">
+  <div class="top"><div class="brand">ANSENA · CAPABILITY ASSESSMENT</div><span class="tag">CC · PW</span></div>
+  <section id="landing" class="card hero">
+    <span class="tag">CANDIDATE TEST</span>
+    <h1>Corporate Communications<br>&amp; People &amp; Workplace</h1>
+    <p>Masukkan link atau kode undangan dari admin. Assessment akan menilai reasoning dasar sesuai posisi yang dipilih dan merekam pelanggaran mode tes.</p>
+    <div class="spacer"></div>
+    <div class="grid">
+      <div class="field"><label>KODE / LINK UNDANGAN</label><input id="inviteInput" autocomplete="off" placeholder="Tempel kode atau link"></div>
+      <div style="display:flex;align-items:end"><button class="btn blue" id="openInvite" style="width:100%">Buka Assessment</button></div>
+    </div>
+    <div id="landingMsg"></div>
+  </section>
+
+  <section id="gate" class="card hero hidden">
+    <span class="tag" id="gateRole">ASSESSMENT</span>
+    <h1 id="gateName">Candidate</h1>
+    <p id="gateMeta"></p>
+    <div class="hr"></div>
+    <div class="grid">
+      <div class="field"><label>NAMA LENGKAP</label><input id="identityName"></div>
+      <div class="field"><label>NO. HP / EMAIL</label><input id="identityContact"></div>
+    </div>
+    <div class="field"><label>POSISI SAAT INI (OPSIONAL)</label><input id="identityCurrentRole"></div>
+    <div class="warning small"><b>Mode tes:</b> setelah dimulai, fullscreen wajib. Keluar fullscreen, berpindah tab/aplikasi, atau kehilangan fokus akan mengakhiri tes otomatis. Copy/paste, seleksi teks, context menu, serta shortcut umum untuk print/save/source/reload diblokir sebisa browser.</div>
+    <div class="spacer"></div>
+    <button class="btn blue" id="startBtn">Masuk Fullscreen &amp; Mulai Tes</button>
+    <div id="gateMsg"></div>
+  </section>
+
+  <section id="exam" class="hidden">
+    <div class="test-head">
+      <div class="row" style="justify-content:space-between">
+        <div><b id="examRole"></b><div class="small muted" id="examCandidate"></div></div>
+        <div class="timer" id="timer">--:--</div>
+      </div>
+      <div class="spacer" style="height:9px"></div>
+      <div class="progressbar"><div id="progress"></div></div>
+    </div>
+    <div id="questions"></div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="small muted" id="answered">0 dijawab</div>
+        <button class="btn blue" id="submitBtn">Kirim Jawaban</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="finished" class="card hero hidden">
+    <span class="tag">ASSESSMENT CLOSED</span>
+    <h1 id="finishTitle">Selesai</h1>
+    <p id="finishText">Jawaban sudah tersimpan.</p>
+  </section>
+
+  <div class="spacer"></div>
+  <div class="warning small"><b>Batas teknis:</b> browser tidak dapat 100% mencegah screenshot hardware, kamera/perangkat kedua, atau manipulasi OS. Untuk kestabilan fullscreen, gunakan Chrome/Edge desktop.</div>
+</main>
+<script src="/candidate.js"></script>
+</body>
+</html>
