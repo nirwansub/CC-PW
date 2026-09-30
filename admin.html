@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ansena Assessment Admin</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main class="wrap">
+  <div class="top"><div class="brand">ANSENA · ASSESSMENT ADMIN</div><a class="tag" href="/">Candidate View</a></div>
+  <div id="login"></div>
+  <div id="admin" class="hidden">
+    <div class="tabs"><button data-tab="results" class="active">Results</button><button data-tab="invite">Create Invite</button></div>
+    <section id="tab-results">
+      <div class="admin-layout">
+        <aside class="side"><div class="card"><div class="field"><label>CARI</label><input id="search" placeholder="Nama / posisi"></div><div id="submissionList"></div></div></aside>
+        <section id="detail"><div class="card hero"><h1>Pilih kandidat</h1><p>Nilai otomatis, capability breakdown, security log, dan checklist capability akan muncul di sini.</p></div></section>
+      </div>
+    </section>
+    <section id="tab-invite" class="hidden">
+      <div class="card" style="max-width:720px">
+        <h2>Buat Undangan Assessment</h2>
+        <div class="field"><label>NAMA KANDIDAT</label><input id="invName"></div>
+        <div class="field"><label>TEAM &amp; POSISI</label><select id="invRole"></select></div>
+        <div class="grid">
+          <div class="field"><label>DURASI (MENIT)</label><input id="invDuration" type="number" min="5" max="90" value="15"></div>
+          <div class="field"><label>BERLAKU (JAM)</label><input id="invExpiry" type="number" min="1" max="720" value="168"></div>
+        </div>
+        <button id="createInvite" class="btn blue">Buat Link</button>
+        <div id="inviteResult"></div>
+      </div>
+    </section>
+  </div>
+</main>
+<script src="/admin.js"></script>
+</body>
+</html>
