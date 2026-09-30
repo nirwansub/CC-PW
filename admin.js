@@ -1,7 +1,7 @@
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m]));
 const api=async(action,opt={})=>{
-  const r=await fetch("/api/index?action="+encodeURIComponent(action),opt);
+  const r=await fetch("/api/index?action="+action,opt);
   let j={};try{j=await r.json()}catch{}
   if(!r.ok)throw new Error(j.error||"Error");
   return j;
