@@ -1,6 +1,6 @@
 const $=s=>document.querySelector(s);
 const api=async(action,opt={})=>{
-  const r=await fetch("/api/index?action="+encodeURIComponent(action),opt);
+  const r=await fetch("/api/index?action="+action,opt);
   let j={}; try{j=await r.json()}catch{}
   if(!r.ok) throw new Error(j.error||"Terjadi kesalahan");
   return j;
