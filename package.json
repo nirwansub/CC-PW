@@ -11,6 +11,8 @@
     "test": "node --loader ./test/loader.js --test test/*.test.js"
   },
   "dependencies": {
-    "@vercel/blob": "^2.3.0"
+    "@vercel/blob": "^2.3.0",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4"
   }
 }
