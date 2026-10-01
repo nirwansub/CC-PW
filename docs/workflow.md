@@ -39,3 +39,8 @@ Post-tests are hidden and blocked by default for every participant, including ex
 Production incident logs showed time_expired submissions 0.4–6 seconds after start, with server deadlines still nearly 15 minutes away. Browser countdowns now anchor to serverNow from start/quiz and performance.now() elapsed time, independent of the device wall clock. The server rejects a time_expired request before its own deadline.
 
 Admin maintenance can recover only provably premature time_expired terminations (submittedAt at least two seconds before expiresAt, with no post-test started). Recovery retains the prior stage in audit history, keeps answers, presentation, identity and access code, removes obsolete grades, and pauses the unspent time. The candidate refreshes and selects “Lanjutkan sesi”; only then does the server establish the resumed deadline. Genuine deadline expirations and ordinary completed submissions are unaffected.
+
+
+## Ended tests continue to profile and materials — 1 October 2026, 16:04 WIB
+
+Submitted and terminated pre-tests both allow the untimed, non-scoring personal profile, grading of saved answers, recommendations, admin-selected PDF materials and QR publication. Unanswered questions keep their existing zero-score treatment; answered essays are graded with the same rubric. Admin details display the answered count. Ending a pre-test does not end the participant's full journey. Post-test access still requires manual admin release. Pre-test closing starts grading independently of whether the personal profile is completed; profile updates do not change scores.
