@@ -20,3 +20,10 @@ Validasi lokal: 14 tes otomatis lulus, build dan sintaks lulus. Semua sembilan a
 Penilai AI memilih indeks potongan jawaban asli sebagai evidence; server mengembalikan kutipan persis untuk setiap kriteria. Nilai dan bobot tidak berubah.
 
 Revisi keamanan 1 Oktober 2026 pukul 13.57 WIB: keluar fullscreen, pindah tab/aplikasi atau kehilangan fokus menampilkan popup Kecurangan terdeteksi dengan tombol lanjutkan tes. Kesempatan dan jawaban tidak langsung diakhiri. Konfirmasi mengembalikan fullscreen; timer pre tetap berjalan. Peringatan dan konfirmasinya tercatat untuk admin. Waktu habis tetap menutup tes.
+
+
+## Security policy updated 1 October 2026, 14:10 WIB
+
+Fullscreen is attempted at start and is optional thereafter. Fullscreen exit alone never flags cheating. On a touch device, visible-page focus loss while an editable field is active is treated as an on-screen keyboard transition; a hidden page still raises a warning. Copy, cut, paste, clipboard/drop beforeinput, context menu, drag/drop, auxiliary link clicks and intercepted browser shortcuts are blocked during an active test. Browsers/OS may reserve shortcuts and browser chrome actions, so this is detection and deterrence, not a kiosk guarantee.
+
+A warning displays “Kecurangan terdeteksi” and “lanjutkan tes”, plus a ten-second countdown. Without confirmation, partial saved answers are submitted and locked, marked for admin review. Warning deadlines are persisted on the server and cannot be extended by duplicate events or reload. A suspended browser may delay its network request; the persisted deadline is settled on the next candidate/admin request and late resume/save requests are rejected. The assessment timer also continues.
