@@ -44,3 +44,5 @@ Admin maintenance can recover only provably premature time_expired terminations 
 ## Ended tests continue to profile and materials — 1 October 2026, 16:04 WIB
 
 Submitted and terminated pre-tests both allow the untimed, non-scoring personal profile, grading of saved answers, recommendations, admin-selected PDF materials and QR publication. Unanswered questions keep their existing zero-score treatment; answered essays are graded with the same rubric. Admin details display the answered count. Ending a pre-test does not end the participant's full journey. Post-test access still requires manual admin release. Pre-test closing starts grading independently of whether the personal profile is completed; profile updates do not change scores.
+
+Positive AI scores now require a nonnegative evidence index in the JSON response schema. Only score zero permits “no evidence” (-1). Exact-quote validation remains enforced. This addresses recoverable AI output failures on partially answered tests without inventing evidence or changing rubric scores.
