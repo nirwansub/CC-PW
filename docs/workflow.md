@@ -15,4 +15,6 @@ Keputusan Nirwan, 1 Oktober 2026 pukul 12.37 WIB, menggantikan bagian durasi/pra
 - Rancangan bank soal, rubrik dan bobot dipakai untuk trial. Kalibrasi berikutnya memakai masukan Nirwan dari trial; tidak menghambat penggunaan versi ini.
 - Repository tetap public sesuai keputusan user. Daftar kandidat nyata tidak ditulis ke repository.
 
-Validasi lokal: 13 tes otomatis lulus, build dan sintaks lulus. Semua sembilan aset PDF dirender dan ditinjau.
+Validasi lokal: 14 tes otomatis lulus, build dan sintaks lulus. Semua sembilan aset PDF dirender dan ditinjau.
+
+Penilai AI memilih indeks potongan jawaban asli sebagai evidence; server mengembalikan kutipan persis untuk setiap kriteria. Nilai dan bobot tidak berubah.
