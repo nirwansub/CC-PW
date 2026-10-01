@@ -27,3 +27,8 @@ Revisi keamanan 1 Oktober 2026 pukul 13.57 WIB: keluar fullscreen, pindah tab/ap
 Fullscreen is attempted at start and is optional thereafter. Fullscreen exit alone never flags cheating. On a touch device, visible-page focus loss while an editable field is active is treated as an on-screen keyboard transition; a hidden page still raises a warning. Copy, cut, paste, clipboard/drop beforeinput, context menu, drag/drop, auxiliary link clicks and intercepted browser shortcuts are blocked during an active test. Browsers/OS may reserve shortcuts and browser chrome actions, so this is detection and deterrence, not a kiosk guarantee.
 
 A warning displays “Kecurangan terdeteksi” and “lanjutkan tes”, plus a ten-second countdown. Without confirmation, partial saved answers are submitted and locked, marked for admin review. Warning deadlines are persisted on the server and cannot be extended by duplicate events or reload. A suspended browser may delay its network request; the persisted deadline is settled on the next candidate/admin request and late resume/save requests are rejected. The assessment timer also continues.
+
+
+## Manual post-test release — 1 October 2026, 14:56 WIB
+
+Post-tests are hidden and blocked by default for every participant, including existing invitations. Publishing selected materials does not unlock post-tests. In each candidate's admin detail, after publishing materials, use “Buka post-test” to reveal the start buttons for that candidate's selected roles. The participant must still acknowledge reading each role's materials before starting its test. Access can be closed again before any post-test has begun; started attempts remain available to finish.
