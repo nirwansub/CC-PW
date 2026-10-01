@@ -18,3 +18,5 @@ Keputusan Nirwan, 1 Oktober 2026 pukul 12.37 WIB, menggantikan bagian durasi/pra
 Validasi lokal: 14 tes otomatis lulus, build dan sintaks lulus. Semua sembilan aset PDF dirender dan ditinjau.
 
 Penilai AI memilih indeks potongan jawaban asli sebagai evidence; server mengembalikan kutipan persis untuk setiap kriteria. Nilai dan bobot tidak berubah.
+
+Revisi keamanan 1 Oktober 2026 pukul 13.57 WIB: keluar fullscreen, pindah tab/aplikasi atau kehilangan fokus menampilkan popup Kecurangan terdeteksi dengan tombol lanjutkan tes. Kesempatan dan jawaban tidak langsung diakhiri. Konfirmasi mengembalikan fullscreen; timer pre tetap berjalan. Peringatan dan konfirmasinya tercatat untuk admin. Waktu habis tetap menutup tes.

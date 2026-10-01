@@ -3,3 +3,5 @@ footer{margin-top:36px}.between{justify-content:space-between}.journey{display:f
 
 
 .material-qr{width:220px;max-width:100%;display:block;background:#fff;border-radius:12px}.material-download{margin-top:20px}.codebox{font-variant-numeric:tabular-nums;letter-spacing:.08em}
+
+.security-warning{border:0;border-radius:20px;padding:32px;max-width:460px;width:calc(100% - 40px);box-shadow:0 24px 80px #102b3a55}.security-warning::backdrop{background:#102b3acc}.security-warning h2{margin-top:0}
