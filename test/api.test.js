@@ -56,7 +56,7 @@ test('scoring revision archives old scores once, preserves answers and holds mat
  assert.deepEqual(d.record.stages.pre.answers,a);assert.equal(d.record.stages.pre.scoreHistory.length,1);assert.deepEqual(d.record.stages.pre.scoreHistory[0].previousResult,before.stages.pre.result);assert.equal(d.record.materialSelectionHistory.length,1);assert.equal(d.download,null);
  assert.equal((await req('material-pdf',null,{code:inv.accessCode},false)).code,423);
  assert.equal((await req('start',{token,stage:'comparison'})).code,400);
- const first=await req('start',{token,stage:'comparison',consent:true});assert.equal(first.code,200);assert.equal(first.value.expiresAt,null);assert.deepEqual(first.value.questions.map(q=>q.id),questionsFor('comparison').map(q=>q.id));
+ const first=await req('start',{token,stage:'comparison',consent:true});assert.equal(first.code,200);assert.equal(first.value.expiresAt,null);assert.deepEqual(first.value.questions.map(q=>q.id),questionsFor('comparison').map(q=>q.id));await req('admin-operations',{materialsHeld:true,comparisonEnabled:false});assert.equal((await req('quiz',null,{token,stage:'comparison'})).code,200);await req('admin-operations',{materialsHeld:true,comparisonEnabled:true});
  assert.equal((await req('admin-materials',{token,roles:['cc-creative']})).code,409);
  const followup=answers('comparison');await req('save',{token,stage:'comparison',answers:followup,revision:1});await req('submit',{token,stage:'comparison',answers:followup});await req('evaluate',{token,stage:'comparison'});
  d=(await req('admin-submissions',null,{id:token})).value;assert.equal(d.primaryAssessment.source,'comparison');assert.equal(d.primaryAssessment.result.answeredCount,10);assert.deepEqual(d.record.stages.pre.answers,a);

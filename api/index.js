@@ -1,3 +1,4 @@
+import {recalculateRecord} from '../lib/revision.js';
 import crypto from 'node:crypto';
 import {ROLES,CAPS,WEIGHTS,VERSION,PILOT,DURATION,HANDBOOK,COMMON_HANDBOOK,questionsFor,publicQuestions} from '../lib/assessment.js';
 import {validateAnswers,aggregate,routing,candidateSummary,finalRoleResults,primaryAssessment,baselineReady,SCORING_VERSION,SCORING_POLICY} from '../lib/scoring.js';
@@ -52,7 +53,7 @@ export default async function handler(req,res){
  if(action==='admin-logout'&&method==='POST'){res.setHeader('Set-Cookie','ansena_admin=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');return response(res,200,{ok:true});}
  if(action.startsWith('admin-')){
  admin(req);
- if(action==='admin-recalculate'&&method==='POST'){const{token}=body(req);safeToken(token);await mutate(path(token),r=>{const s=r.stages.pre;if(!s||!['submitted','terminated'].includes(s.status)||s.grading?.status!=='complete')throw error(409,'Selesaikan penilaian pre-test sebelum menghitung ulang');if(s.result?.scoringVersion===SCORING_VERSION&&r.requiresComparison)return;s.scoreHistory??=[];s.scoreHistory.push({at:Date.now(),reason:'authorized_scoring_revision',previousResult:structuredClone(s.result),previousGrading:structuredClone(s.grading),previousGrades:structuredClone(s.grades||[])});s.result=aggregate('pre',s.answers,s.grades||[]);if(!s.result.complete)throw error(409,'Rubrik esai belum lengkap');s.recalculatedAt=Date.now();r.requiresComparison=true;r.scoringRevision=SCORING_VERSION;if(r.materialSelection){r.materialSelectionHistory??=[];r.materialSelectionHistory.push({at:Date.now(),reason:'scoring_revision',previous:structuredClone(r.materialSelection)});}r.materialSelection={roles:suggestedMaterials(r),releasedAt:null,source:'system_diagnostic',requiresReview:true};});return response(res,200,{ok:true,scoringVersion:SCORING_VERSION});}
+ if(action==='admin-recalculate'&&method==='POST'){const{token}=body(req);safeToken(token);await mutate(path(token),recalculateRecord);return response(res,200,{ok:true,scoringVersion:SCORING_VERSION});}
  if(action==='admin-comparison-reset'&&method==='POST'){const{token,reason}=body(req);if(typeof reason!=='string'||!reason.trim())throw error(400,'Isi alasan mengulang pendalaman');await mutate(path(token),r=>{const s=r.stages.comparison;if(r.materialSelection?.releasedAt||Object.keys(r.stages).some(k=>k.startsWith('post:')))throw error(409,'Tahan ulang materi dan selesaikan review admin sebelum mengulang pendalaman');if(!s||!['submitted','terminated'].includes(s.status))throw error(409,'Pendalaman belum berakhir');if(s.grading?.status==='running'&&s.grading.expiresAt>Date.now())throw error(409,'Tunggu penilaian selesai');r.comparisonHistory??=[];r.comparisonHistory.push({at:Date.now(),reason:reason.slice(0,500),previous:structuredClone(s)});delete r.stages.comparison;});return response(res,200,{ok:true});}
  if(action==='admin-operations'&&method==='POST'){const b=body(req);if(typeof b.materialsHeld!=='boolean'||typeof b.comparisonEnabled!=='boolean')throw error(400,'Status operasional tidak valid');await write('settings/v3-operations.json',{materialsHeld:b.materialsHeld,comparisonEnabled:b.comparisonEnabled,updatedAt:Date.now()});return response(res,200,{ok:true,...await operations()});}
  if(action==='admin-config'&&method==='GET'){const ai=await aiConfig();return response(res,200,{roles:ROLES,caps:CAPS,weights:WEIGHTS,pilot:PILOT,duration:DURATION,scoring:SCORING_POLICY,comparisonBank:questionsFor('comparison'),operations:await operations(),ai:{configured:!!ai.key,model:ai.model},bank:questionsFor('pre')});}
@@ -73,7 +74,7 @@ export default async function handler(req,res){
  }
  const b=method==='POST'?body(req):{};
  const ops=await operations();
- if(['start','quiz'].includes(action)&&(b.stage||query(req,'stage'))==='comparison'&&!ops.comparisonEnabled)throw error(409,'Pendalaman pembanding belum dibuka oleh admin');
+ if(action==='start'&&b.stage==='comparison'&&!ops.comparisonEnabled)throw error(409,'Pendalaman pembanding belum dibuka oleh admin');
  if(ops.materialsHeld&&(['material-pdf','materials','materials-read'].includes(action)||(['start','quiz'].includes(action)&&(b.stage||query(req,'stage')).startsWith('post:'))))throw error(423,'Materi sedang ditahan untuk pembaruan penilaian. Tunggu pengumuman penyelenggara.');
  if(action==='resolve-code'&&method==='POST')return response(res,200,{token:await resolveCode(b.code,req)});
  const token=safeToken(b.token||query(req,'token')||(action==='material-pdf'&&query(req,'code')?await resolveCode(query(req,'code'),req):''));

@@ -29,3 +29,5 @@ Role-specific post-test and universal baseline are non-equivalent forms; their r
 ## Verification
 
 Regression checks cover clock-skew handling, iPad fullscreen/typing exceptions, ten-second warning confirmation, answer persistence, manual post access, missing-versus-zero scoring, attainable normalization, evidence sufficiency, common-case equality, baseline replacement, idempotent history preservation, material holds, candidate/admin UI and replacement access without an old timed attempt. Live verification uses a synthetic candidate and does not alter participant responses.
+
+The authorized one-time production deployment job runs inside Vercel using existing private storage credentials. It verifies each mutation, enables the common form while keeping materials held, exercises the real backend/AI on a synthetic disposable record, and records a private completion marker. Future deployments skip the completed migration. It introduces no public maintenance route and writes no credentials or candidate details to build logs. Closing common-form starts does not interrupt an existing common attempt.
