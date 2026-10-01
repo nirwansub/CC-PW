@@ -32,3 +32,10 @@ A warning displays “Kecurangan terdeteksi” and “lanjutkan tes”, plus a t
 ## Manual post-test release — 1 October 2026, 14:56 WIB
 
 Post-tests are hidden and blocked by default for every participant, including existing invitations. Publishing selected materials does not unlock post-tests. In each candidate's admin detail, after publishing materials, use “Buka post-test” to reveal the start buttons for that candidate's selected roles. The participant must still acknowledge reading each role's materials before starting its test. Access can be closed again before any post-test has begun; started attempts remain available to finish.
+
+
+## Premature expiry repair — 1 October 2026
+
+Production incident logs showed time_expired submissions 0.4–6 seconds after start, with server deadlines still nearly 15 minutes away. Browser countdowns now anchor to serverNow from start/quiz and performance.now() elapsed time, independent of the device wall clock. The server rejects a time_expired request before its own deadline.
+
+Admin maintenance can recover only provably premature time_expired terminations (submittedAt at least two seconds before expiresAt, with no post-test started). Recovery retains the prior stage in audit history, keeps answers, presentation, identity and access code, removes obsolete grades, and pauses the unspent time. The candidate refreshes and selects “Lanjutkan sesi”; only then does the server establish the resumed deadline. Genuine deadline expirations and ordinary completed submissions are unaffected.
