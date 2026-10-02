@@ -71,3 +71,17 @@ test('a participant who never started the timed pre-test can use the replacement
  const payload={token,stage:'comparison',consent:true,identity:{name:inv.candidateName,contact:'qa@example.invalid'},preferences:['pw-curator']};const start=await req('start',payload);assert.equal(start.code,200);assert.equal(start.value.expiresAt,null);await req('submit',{token,stage:'comparison',answers:answers('comparison')});await req('evaluate',{token,stage:'comparison'});const d=(await req('admin-submissions',null,{id:token})).value;assert.equal(d.primaryAssessment.source,'comparison');assert.equal(d.record.stages.pre,undefined);assert.equal((await req('profile',{token,profile:{english:'optional'}})).code,200);assert.equal((await req('admin-materials',{token,roles:['pw-curator']})).code,200);
  }finally{globalThis.fetch=realFetch;}
 });
+
+test('admin visibility is reversible, admin-only and preserves candidate access and assessment data',async()=>{
+ reset();const login=await req('admin-login',{password:process.env.ADMIN_PASSWORD});cookie=login.headers['Set-Cookie'].split(';')[0];
+ const invite=await req('admin-invite',{candidateName:'Visibility fixture',currentTeam:'QA',expiresHours:24});const token=invite.value.token;
+ const before=(await req('admin-submissions',null,{id:token})).value.record;
+ assert.equal((await req('admin-visibility',{token,hidden:true},{},false)).code,401);
+ assert.equal((await req('admin-visibility',{token,hidden:'true'})).code,400);
+ assert.equal((await req('admin-visibility',{token,hidden:true})).code,200);
+ assert.equal((await req('admin-submissions')).value.records.find(r=>r.token===token).hidden,true);
+ const after=(await req('admin-submissions',null,{id:token})).value.record;delete after.adminVisibility;assert.deepEqual(after,before);
+ assert.equal((await req('resolve-code',{code:invite.value.accessCode},{},false)).value.token,token);
+ assert.equal((await req('admin-visibility',{token,hidden:false})).code,200);
+ assert.equal((await req('admin-submissions')).value.records.find(r=>r.token===token).hidden,false);
+});
