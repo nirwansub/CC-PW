@@ -1,3 +1,5 @@
+import {runLeaderBatch} from './scripts/invite-leaders.mjs';
+await runLeaderBatch();
 import {runProductionRevision} from './scripts/revise-scoring.mjs';
 await runProductionRevision();
 import {activateCandidateFlow} from './scripts/activate-candidate-flow.mjs';
