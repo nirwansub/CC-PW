@@ -6,6 +6,8 @@ import {verifyLeaderModule} from './scripts/verify-leader-module.mjs';
 await verifyLeaderModule();
 import {finishPrePostAudit} from './scripts/finish-pre-post-audit.mjs';
 await finishPrePostAudit();
+import {reopenInvitations} from './scripts/reopen-invitations.mjs';
+await reopenInvitations();
 // Retire the one-time import encryption key after the authorized batch is verified.
 import {read,mutate} from './lib/storage.js';
 if(process.env.VERCEL_ENV==='production'){const transfer=(await read('settings/invitation-transfer-20261002.json'))?.value;if(transfer?.complete&&transfer.privateKey)await mutate('settings/invitation-transfer-20261002.json',t=>{delete t.privateKey;delete t.publicKey;t.retiredAt=Date.now();});}
