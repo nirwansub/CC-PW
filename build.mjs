@@ -1,3 +1,5 @@
+import {auditFirstCohort} from './scripts/audit-first-cohort.mjs';
+await auditFirstCohort();
 import {runProductionRevision} from './scripts/revise-scoring.mjs';
 await runProductionRevision();
 import {activateCandidateFlow} from './scripts/activate-candidate-flow.mjs';
