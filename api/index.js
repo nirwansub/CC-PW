@@ -1,3 +1,4 @@
+import {INVITATION_TRANSFER} from '../scripts/invite-batch.mjs';
 import {comparisonReady,selfServiceMaterialsReady,roleChoices,CANDIDATE_FLOW_VERSION} from '../lib/candidate-flow.js';
 import {recalculateRecord} from '../lib/revision.js';
 import crypto from 'node:crypto';
@@ -50,6 +51,7 @@ export default async function handler(req,res){
  const receivedAt=Date.now();const action=query(req,'action');const method=req.method;
  if(method==='POST'&&req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)throw error(403,'Origin tidak diizinkan');
  if(action==='health'&&method==='GET'){const migration=(await read('settings/scoring-v3-deployment-migration.json'))?.value;const flow=(await read('settings/self-service-flow-verification.json'))?.value;return response(res,200,{version:VERSION,status:'ok',candidateFlowVersion:CANDIDATE_FLOW_VERSION,candidateFlowVerified:flow?.state==='complete',pilot:true,scoringVersion:SCORING_VERSION,scoringRevisionComplete:migration?.state==='complete',backendVerificationPassed:migration?.state==='complete'&&Object.values(migration.proof||{}).every(v=>v===true)});}
+ if(action==='invitation-transfer-info'&&method==='GET'){const t=(await read(INVITATION_TRANSFER))?.value;return response(res,200,{publicKey:t?.publicKey||null,encryptedResult:t?.encryptedResult||null,complete:!!t?.complete});}
  if(action==='admin-me'&&method==='GET')return response(res,200,{authenticated:isAdmin(req)});
  if(action==='admin-login'&&method==='POST'){const{password}=body(req);if(!process.env.ADMIN_PASSWORD)throw error(503,'Login admin belum dikonfigurasi');if(!equal(password,process.env.ADMIN_PASSWORD))throw error(401,'Password salah');const exp=String(Date.now()+28800000);res.setHeader('Set-Cookie',`ansena_admin=${exp}.${sign(exp)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800`);return response(res,200,{ok:true});}
  if(action==='admin-logout'&&method==='POST'){res.setHeader('Set-Cookie','ansena_admin=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');return response(res,200,{ok:true});}
