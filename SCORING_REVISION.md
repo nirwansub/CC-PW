@@ -31,3 +31,14 @@ Role-specific post-test and universal baseline are non-equivalent forms; their r
 Regression checks cover clock-skew handling, iPad fullscreen/typing exceptions, ten-second warning confirmation, answer persistence, manual post access, missing-versus-zero scoring, attainable normalization, evidence sufficiency, common-case equality, baseline replacement, idempotent history preservation, material holds, candidate/admin UI and replacement access without an old timed attempt. Live verification uses a synthetic candidate and does not alter participant responses.
 
 The authorized one-time production deployment job runs inside Vercel using existing private storage credentials. It verifies each mutation, enables the common form while keeping materials held, exercises the real backend/AI on a synthetic disposable record, and records a private completion marker. Future deployments skip the completed migration. It introduces no public maintenance route and writes no credentials or candidate details to build logs. Closing common-form starts does not interrupt an existing common attempt.
+
+
+## Candidate material flow — 2026-10-02
+
+The same participant code opens an untimed common comparison, automatically grades a complete submission, then shows eight role-fit scores and preference/recommendation labels. Only role scores are shared with the participant; capability values, rubric evidence, grades and historical results remain admin-only. Default selections combine original preferences with the top two observed role fits. Candidates confirm one or more roles to publish a PDF containing common principles and exactly their selected role modules, with a download link and QR. Post-test access remains a separate manual admin action.
+
+All material routes enforce completed, graded common comparison and a selection published against that baseline. Global material holds override self-service. Existing pre-test results are retained for diagnostics.
+
+Security rules remain active. An incomplete auto-submitted comparison can resume unanswered cases. Earlier nonempty answers are immutable; prior partial results and security events are retained. Full submissions cannot be reopened by candidates. AI failure preserves all submitted answers and allows grading retry. Selection history records changes; roles with started post-tests cannot be removed.
+
+A one-time private production activation verifies real AI grading, interrupted-answer recovery, score projection, selections, PDF, QR, and manual post-test gating on a disposable fixture. It preserves participant records and respects later admin settings.
