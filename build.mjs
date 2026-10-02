@@ -4,8 +4,8 @@ import {activateCandidateFlow} from './scripts/activate-candidate-flow.mjs';
 await activateCandidateFlow();
 import {verifyLeaderModule} from './scripts/verify-leader-module.mjs';
 await verifyLeaderModule();
-import {auditPrePost} from './scripts/audit-pre-post.mjs';
-await auditPrePost();
+import {finishPrePostAudit} from './scripts/finish-pre-post-audit.mjs';
+await finishPrePostAudit();
 // Retire the one-time import encryption key after the authorized batch is verified.
 import {read,mutate} from './lib/storage.js';
 if(process.env.VERCEL_ENV==='production'){const transfer=(await read('settings/invitation-transfer-20261002.json'))?.value;if(transfer?.complete&&transfer.privateKey)await mutate('settings/invitation-transfer-20261002.json',t=>{delete t.privateKey;delete t.publicKey;t.retiredAt=Date.now();});}
