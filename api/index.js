@@ -79,11 +79,11 @@ export default async function handler(req,res){
    const s=r.stages[stage];if(!s||!['submitted','terminated'].includes(s.status)||s.grading?.status!=='complete'||!s.grades?.length)throw error(409,'Tahap harus sudah selesai dinilai');
    if(s.evidenceJob?.expiresAt>Date.now())throw error(409,'Audit/penilaian sedang berjalan');
    const source=fingerprint(s);
-   if(action==='admin-evidence-audit'&&s.evidenceAudit?.sourceFingerprint===source){cached=s.evidenceAudit;return;}
+   if(action==='admin-evidence-audit'&&s.evidenceAudit?.version===AUDIT_VERSION&&s.evidenceAudit?.sourceFingerprint===source){cached=s.evidenceAudit;return;}
    if(action==='admin-evidence-regrade'){
-    if(s.evidenceRevision?.status==='ready'&&s.evidenceRevision.sourceFingerprint===source){cached=s.evidenceRevision;return;}
+    if(s.evidenceRevision?.status==='ready'&&s.evidenceRevision.evaluated?.gradingVersion===GRADING_VERSION&&s.evidenceRevision.sourceFingerprint===source){cached=s.evidenceRevision;return;}
     const audit=inspectEvidence(stage,s),semantic=s.evidenceAudit;
-    if(!audit.affected&&!(semantic?.sourceFingerprint===source&&semantic.needsReview))throw error(409,'Tidak ada temuan audit yang memerlukan penilaian ulang');
+    if(!audit.affected&&!(semantic?.version===AUDIT_VERSION&&semantic?.sourceFingerprint===source&&semantic.needsReview))throw error(409,'Tidak ada temuan audit yang memerlukan penilaian ulang');
    }
    snapshot=structuredClone(s);s.evidenceJob={id:jobId,action,expiresAt:Date.now()+80000};
   });
@@ -91,7 +91,7 @@ export default async function handler(req,res){
   try{
    const cfg=await aiConfig();const result=action==='admin-evidence-audit'?await auditSemantics(stage,snapshot,cfg.key,cfg.model):await gradeEssays(stage,snapshot.answers,cfg.key,cfg.model);
    let saved;await mutate(p,r=>{const s=r.stages[stage];if(s.evidenceJob?.id!==jobId||fingerprint(s)!==fingerprint(snapshot))throw error(409,'Jawaban/nilai berubah selama pemeriksaan');
-    if(action==='admin-evidence-audit'){s.evidenceAudit=result;saved=result;}
+    if(action==='admin-evidence-audit'){if(s.evidenceAudit){s.evidenceAuditHistory??=[];s.evidenceAuditHistory.push(s.evidenceAudit);}s.evidenceAudit=result;saved=result;}
     else{if(s.evidenceRevision){s.evidenceRevisionHistory??=[];s.evidenceRevisionHistory.push(s.evidenceRevision);}s.evidenceRevision={id:jobId,status:'ready',sourceFingerprint:fingerprint(snapshot),createdAt:Date.now(),reason:'Perbaikan bukti rubrik berdasarkan audit',audit:inspectEvidence(stage,snapshot),semanticAudit:snapshot.evidenceAudit||null,evaluated:result,result:aggregate(stage,snapshot.answers,result.grades),changes:gradeChanges(snapshot.grades,result.grades)};saved=s.evidenceRevision;}
     delete s.evidenceJob;
    });return response(res,200,{ok:true,result:saved});
