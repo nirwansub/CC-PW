@@ -25,7 +25,7 @@ test('inventory includes hidden participants, detects structural defects and nev
 });
 test('semantic audit examines relevance without modifying old scores or accepting missing results',async()=>{
  const s={...fixture(),grades:detailed()},before=structuredClone(s);let sent;
- const fetcher=async(u,o)=>{sent=JSON.parse(o.body);return new Response(JSON.stringify({status:'completed',model:'fixture',output:[{content:[{type:'output_text',text:JSON.stringify({reviews:{[q.id]:Object.fromEntries(q.criteria.map(c=>[c.cap,{status:'needs_review',reason:'Kutipan belum mendukung unsur rubrik yang dinilai.'}]))}})}]}]}));};
+ const fetcher=async(u,o)=>{sent=JSON.parse(o.body);return new Response(JSON.stringify({status:'completed',model:'fixture',output:[{content:[{type:'output_text',text:JSON.stringify({reviews:{[q.id]:Object.fromEntries(q.criteria.map(c=>[c.cap,{evidenceStatus:'irrelevant',scoreStatus:'appropriate',reason:'Kutipan belum mendukung unsur rubrik yang dinilai.'}]))}})}]}]}));};
  const audit=await auditSemantics(stage,s,'sk-fixture','fixture',fetcher);assert.equal(audit.needsReview,true);assert.deepEqual(s,before);assert.ok(!sent.input.includes('candidateName'));assert.equal(sent.store,false);
  await assert.rejects(()=>auditSemantics(stage,s,'sk-fixture','fixture',async()=>new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:'{"reviews":{}}'}]}]}))));
 });
