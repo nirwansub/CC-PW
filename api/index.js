@@ -5,7 +5,8 @@ import {recalculateRecord} from '../lib/revision.js';
 import crypto from 'node:crypto';
 import {ROLES,CAPS,WEIGHTS,VERSION,PILOT,DURATION,HANDBOOK,COMMON_HANDBOOK,questionsFor,publicQuestions} from '../lib/assessment.js';
 import {validateAnswers,aggregate,routing,candidateSummary,finalRoleResults,primaryAssessment,baselineReady,SCORING_VERSION,SCORING_POLICY} from '../lib/scoring.js';
-import {gradeEssays} from '../lib/grading.js';
+import {gradeEssays,GRADING_VERSION} from '../lib/grading.js';
+import {AUDIT_VERSION,inspectEvidence,auditInventory,auditSemantics,fingerprint,gradeChanges,applyEvidenceRevision} from '../lib/evidence-audit.js';
 import {read,write,mutate,listValues,remove,Conflict} from '../lib/storage.js';
 import {reserveCode,assignCode,resolveCode} from '../lib/access.js';
 import {suggestedMaterials,selectedMaterials,materialPlan,materialDownload,materialPDF} from '../lib/materials.js';
@@ -40,7 +41,7 @@ function cleanProfile(p){const allowed=['interests','talents','education','readi
 async function evaluate(token,stage){
  const p=path(token);let snapshot;const jobId=uid();
  await mutate(p,r=>{allowed(r,stage);const s=r.stages[stage];if(!s||!['submitted','terminated'].includes(s.status))throw error(409,'Jawaban belum dikirim');if(s.grading?.status==='complete'){snapshot=null;return;}
- if(s.grading?.status==='running'&&s.grading.expiresAt>Date.now())throw error(409,'Penilaian sedang berjalan');s.grading={status:'running',jobId,expiresAt:Date.now()+70000};snapshot=structuredClone(s);});
+ if(s.grading?.status==='running'&&s.grading.expiresAt>Date.now())throw error(409,'Penilaian sedang berjalan');s.grading={status:'running',jobId,expiresAt:Date.now()+80000};snapshot=structuredClone(s);});
  if(!snapshot)return{ok:true};
  try{const cfg=await aiConfig();const evaluated=await gradeEssays(stage,snapshot.answers,cfg.key,cfg.model);const result=aggregate(stage,snapshot.answers,evaluated.grades);
  await mutate(p,r=>{const s=r.stages[stage];if(s.grading?.jobId!==jobId)throw error(409,'Penilaian sudah diperbarui');s.grades=evaluated.grades;s.result=result;s.grading={...evaluated,status:'complete',grades:undefined};s.reviewRequired=evaluated.reviewRequired||s.status==='terminated'||s.securityEvents.some(e=>e.kind==='warning');});return{ok:true};
@@ -51,13 +52,51 @@ export default async function handler(req,res){
  try{
  const receivedAt=Date.now();const action=query(req,'action');const method=req.method;
  if(method==='POST'&&req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)throw error(403,'Origin tidak diizinkan');
- if(action==='health'&&method==='GET'){const migration=(await read('settings/scoring-v3-deployment-migration.json'))?.value;const flow=(await read('settings/self-service-flow-verification.json'))?.value;return response(res,200,{version:VERSION,status:'ok',serverNow:Date.now(),prePostDeadlineAt:PRE_POST_DEADLINE_AT,prePostClosed:prePostClosed(),initialPreRestored:(await read('settings/initial-pre-restored-20261002.json'))?.value?.state==='complete',invitationReload:(await read('settings/invitation-reopen-20261002.json'))?.value||null,prePostAuditVerified:(await read('settings/pre-post-audit-20261002.json'))?.value?.state==='complete',postTestsLocked:(await operations()).postTestsLocked,candidateFlowVersion:CANDIDATE_FLOW_VERSION,candidateFlowVerified:flow?.state==='complete',pilot:true,scoringVersion:SCORING_VERSION,leadershipVersion:LEADERSHIP_VERSION,leadershipVerified:(await read('settings/leader-module-verification.json'))?.value?.state==='complete',scoringRevisionComplete:migration?.state==='complete',backendVerificationPassed:migration?.state==='complete'&&Object.values(migration.proof||{}).every(v=>v===true)});}
+ if(action==='health'&&method==='GET'){const migration=(await read('settings/scoring-v3-deployment-migration.json'))?.value;const flow=(await read('settings/self-service-flow-verification.json'))?.value;return response(res,200,{version:VERSION,gradingVersion:GRADING_VERSION,evidenceAuditVersion:AUDIT_VERSION,status:'ok',serverNow:Date.now(),prePostDeadlineAt:PRE_POST_DEADLINE_AT,prePostClosed:prePostClosed(),initialPreRestored:(await read('settings/initial-pre-restored-20261002.json'))?.value?.state==='complete',invitationReload:(await read('settings/invitation-reopen-20261002.json'))?.value||null,prePostAuditVerified:(await read('settings/pre-post-audit-20261002.json'))?.value?.state==='complete',postTestsLocked:(await operations()).postTestsLocked,candidateFlowVersion:CANDIDATE_FLOW_VERSION,candidateFlowVerified:flow?.state==='complete',pilot:true,scoringVersion:SCORING_VERSION,leadershipVersion:LEADERSHIP_VERSION,leadershipVerified:(await read('settings/leader-module-verification.json'))?.value?.state==='complete',scoringRevisionComplete:migration?.state==='complete',backendVerificationPassed:migration?.state==='complete'&&Object.values(migration.proof||{}).every(v=>v===true)});}
  if(action==='admin-me'&&method==='GET')return response(res,200,{authenticated:isAdmin(req)});
  if(action==='admin-login'&&method==='POST'){const{password}=body(req);if(!process.env.ADMIN_PASSWORD)throw error(503,'Login admin belum dikonfigurasi');if(!equal(password,process.env.ADMIN_PASSWORD))throw error(401,'Password salah');const exp=String(Date.now()+28800000);res.setHeader('Set-Cookie',`ansena_admin=${exp}.${sign(exp)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800`);return response(res,200,{ok:true});}
  if(action==='admin-logout'&&method==='POST'){res.setHeader('Set-Cookie','ansena_admin=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');return response(res,200,{ok:true});}
  if(action.startsWith('admin-')){
  admin(req);
  if((String(body(req).stage||query(req,'stage')).startsWith('post:')||action==='admin-post-access'&&body(req).enabled===true)&&(await operations()).postTestsLocked)throw error(409,'Post-test dikunci untuk seluruh peserta');
+
+ // Audit/regrading is admin-only, separate from participant attempts and access rules.
+ if(action==='admin-evidence-audit'&&method==='GET'){
+  const token=query(req,'token');
+  const records=token?[(await read(path(token)))?.value].filter(Boolean):await listValues('assessments/v2/');
+  const items=auditInventory(records);return response(res,200,{version:AUDIT_VERSION,records:records.length,stages:items.length,affected:items.filter(x=>x.affected).length,items});
+ }
+ if(['admin-evidence-audit','admin-evidence-regrade','admin-evidence-apply'].includes(action)&&method==='POST'){
+  const {token,stage,reason,proposalId}=body(req);const p=path(token);
+  if(!['pre','comparison','leadership'].includes(stage))throw error(400,'Audit perbaikan hanya untuk pre, pendalaman dan leader');
+  if(action==='admin-evidence-apply'){
+   if(typeof reason!=='string'||!reason.trim()||reason.length>1000)throw error(400,'Alasan penerapan wajib');
+   const result=await mutate(p,r=>{const s=r.stages[stage];if(!s)throw error(404,'Tahap tidak ditemukan');if(s.evidenceJob?.expiresAt>Date.now())throw error(409,'Tunggu audit/penilaian selesai');return applyEvidenceRevision(s,stage,proposalId,reason);});
+   return response(res,200,{ok:true,...result});
+  }
+  const jobId=uid();let snapshot;let cached;
+  await mutate(p,r=>{
+   const s=r.stages[stage];if(!s||!['submitted','terminated'].includes(s.status)||s.grading?.status!=='complete'||!s.grades?.length)throw error(409,'Tahap harus sudah selesai dinilai');
+   if(s.evidenceJob?.expiresAt>Date.now())throw error(409,'Audit/penilaian sedang berjalan');
+   const source=fingerprint(s);
+   if(action==='admin-evidence-audit'&&s.evidenceAudit?.sourceFingerprint===source){cached=s.evidenceAudit;return;}
+   if(action==='admin-evidence-regrade'){
+    if(s.evidenceRevision?.status==='ready'&&s.evidenceRevision.sourceFingerprint===source){cached=s.evidenceRevision;return;}
+    const audit=inspectEvidence(stage,s),semantic=s.evidenceAudit;
+    if(!audit.affected&&!(semantic?.sourceFingerprint===source&&semantic.needsReview))throw error(409,'Tidak ada temuan audit yang memerlukan penilaian ulang');
+   }
+   snapshot=structuredClone(s);s.evidenceJob={id:jobId,action,expiresAt:Date.now()+80000};
+  });
+  if(cached)return response(res,200,{ok:true,cached:true,result:cached});
+  try{
+   const cfg=await aiConfig();const result=action==='admin-evidence-audit'?await auditSemantics(stage,snapshot,cfg.key,cfg.model):await gradeEssays(stage,snapshot.answers,cfg.key,cfg.model);
+   let saved;await mutate(p,r=>{const s=r.stages[stage];if(s.evidenceJob?.id!==jobId||fingerprint(s)!==fingerprint(snapshot))throw error(409,'Jawaban/nilai berubah selama pemeriksaan');
+    if(action==='admin-evidence-audit'){s.evidenceAudit=result;saved=result;}
+    else{if(s.evidenceRevision){s.evidenceRevisionHistory??=[];s.evidenceRevisionHistory.push(s.evidenceRevision);}s.evidenceRevision={id:jobId,status:'ready',sourceFingerprint:fingerprint(snapshot),createdAt:Date.now(),reason:'Perbaikan bukti rubrik berdasarkan audit',audit:inspectEvidence(stage,snapshot),semanticAudit:snapshot.evidenceAudit||null,evaluated:result,result:aggregate(stage,snapshot.answers,result.grades),changes:gradeChanges(snapshot.grades,result.grades)};saved=s.evidenceRevision;}
+    delete s.evidenceJob;
+   });return response(res,200,{ok:true,result:saved});
+  }catch(e){await mutate(p,r=>{const s=r.stages[stage];if(s.evidenceJob?.id===jobId){delete s.evidenceJob;s.evidenceAuditError={at:Date.now(),action,message:e.code||'AUDIT_OR_REGRADE_FAILED'};}});throw e;}
+ }
  if(action==='admin-recalculate'&&method==='POST'){const{token}=body(req);safeToken(token);await mutate(path(token),recalculateRecord);return response(res,200,{ok:true,scoringVersion:SCORING_VERSION});}
  if(action==='admin-comparison-reset'&&method==='POST'){const{token,reason}=body(req);if(typeof reason!=='string'||!reason.trim())throw error(400,'Isi alasan mengulang pendalaman');await mutate(path(token),r=>{const s=r.stages.comparison;if(r.materialSelection?.releasedAt||Object.keys(r.stages).some(k=>k.startsWith('post:')))throw error(409,'Tahan ulang materi dan selesaikan review admin sebelum mengulang pendalaman');if(!s||!['submitted','terminated'].includes(s.status))throw error(409,'Pendalaman belum berakhir');if(s.grading?.status==='running'&&s.grading.expiresAt>Date.now())throw error(409,'Tunggu penilaian selesai');r.comparisonHistory??=[];r.comparisonHistory.push({at:Date.now(),reason:reason.slice(0,500),previous:structuredClone(s)});delete r.stages.comparison;});return response(res,200,{ok:true});}
  if(action==='admin-operations'&&method==='POST'){const b=body(req);if(typeof b.materialsHeld!=='boolean'||typeof b.comparisonEnabled!=='boolean')throw error(400,'Status operasional tidak valid');if(b.postTestsLocked!==undefined&&typeof b.postTestsLocked!=='boolean')throw error(400,'Status kunci post-test tidak valid');if(b.selfServeMaterials!==undefined&&typeof b.selfServeMaterials!=='boolean')throw error(400,'Status pemilihan mandiri tidak valid');await write('settings/v3-operations.json',{...await operations(),materialsHeld:b.materialsHeld,comparisonEnabled:b.comparisonEnabled,...(b.selfServeMaterials!==undefined?{selfServeMaterials:b.selfServeMaterials}:{}),...(b.postTestsLocked!==undefined?{postTestsLocked:b.postTestsLocked}:{}),updatedAt:Date.now()});return response(res,200,{ok:true,...await operations()});}

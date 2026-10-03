@@ -1,3 +1,5 @@
+// These workflow fixtures exercise the period before the separately tested cutoff.
+const originalNow=Date.now;Date.now=()=>Date.parse('2026-10-02T06:00:00Z');
 import test from 'node:test';import assert from 'node:assert/strict';
 import {reset} from './memory-blob.js';import {read,write} from '../lib/storage.js';
 import {reopenInvitations} from '../scripts/reopen-invitations.mjs';
@@ -24,3 +26,5 @@ test('restored new participant path enforces 32 timed questions before 10 untime
  assert.equal((await read('settings/initial-pre-restored-20261002.json')).value.state,'complete');
  delete process.env.VERCEL_ENV;
 });
+
+test.after(()=>{Date.now=originalNow;});
