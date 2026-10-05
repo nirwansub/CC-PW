@@ -1,3 +1,4 @@
+import {recalibrateComparison} from '../lib/recalibration.js';
 import {PRE_POST_DEADLINE_AT,PRE_POST_CLOSED_MESSAGE,prePostClosed,blockedAfterDeadline} from '../lib/access-deadline.js';
 import {leadershipReady,LEADERSHIP_VERSION,LEADER_CAPS} from '../lib/leadership.js';
 import {comparisonReady,selfServiceMaterialsReady,roleChoices,CANDIDATE_FLOW_VERSION} from '../lib/candidate-flow.js';
@@ -60,6 +61,7 @@ export default async function handler(req,res){
  admin(req);
  if((String(body(req).stage||query(req,'stage')).startsWith('post:')||action==='admin-post-access'&&body(req).enabled===true)&&(await operations()).postTestsLocked)throw error(409,'Post-test dikunci untuk seluruh peserta');
 
+ if(action==='admin-recalibrate-comparison'&&method==='POST'){const b=body(req);const result=await recalibrateComparison(b.token,b.phase,await aiConfig(),{chunkSize:b.chunkSize??2});return response(res,200,{ok:true,...result});}
  // Audit/regrading is admin-only, separate from participant attempts and access rules.
  if(action==='admin-evidence-audit'&&method==='GET'){
   const token=query(req,'token');
