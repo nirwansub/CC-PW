@@ -36,3 +36,20 @@ test('rubric repair renders multiple escaped quotes, score reasons and old/new h
  context.s={grades:[{id:'cmp01',criteria:[context.c]}],evidenceRevision:{id:'fixture',status:'ready',createdAt:1,changes:[{id:'cmp01',cap,before:3,after:2,rationale:'Sebagian bukti.'}],evaluated:{grades:[{id:'cmp01',criteria:[context.c]}]}},reviewHistory:[{method:'evidence_repair',at:1,reason:'Fix',previousGrades:[{id:'cmp01',criteria:[{cap,score:3,confidence:.7,evidence:'1.'}]}]}]};
  const panel=vm.runInContext("evidenceRepairPanel('comparison',s)",context);assert.match(panel,/Lama/);assert.match(panel,/Baru/);assert.match(panel,/Terapkan usulan/);assert.match(panel,/Nilai sebelum perbaikan/);assert.match(panel,/bukan penggunaan AI oleh peserta/);
 });
+
+test('admin detail navigation ignores stale responses and only reads participant data',async()=>{
+ const elements=new Map();
+ const element=()=>{const classes=new Set();return{value:'',scrollTop:0,innerHTML:'',textContent:'',classList:{add:x=>classes.add(x),remove:x=>classes.delete(x),contains:x=>classes.has(x)},setAttribute(){},removeAttribute(){},scrollIntoView(){},focus(){}};};
+ const document={querySelector:s=>{if(!elements.has(s))elements.set(s,element());return elements.get(s);},querySelectorAll:()=>[]};
+ const pending=[],calls=[],scroll=[];const window={scrollY:720,matchMedia:()=>({matches:true}),scrollTo:o=>scroll.push(o.top)};
+ const ctx=vm.createContext({document,window,Date,URLSearchParams,fetch:(url,options)=>{calls.push({url,options});return new Promise(resolve=>pending.push(data=>resolve({ok:true,json:async()=>data})));}});
+ vm.runInContext(fs.readFileSync(new URL('../admin.js',import.meta.url),'utf8').replace(/auth\(\)\.catch\([^\n]+\);/,''),ctx);
+ vm.runInContext("records=[{token:'first',candidateName:'First'},{token:'second',candidateName:'Second'}];renderList=()=>{};renderDetail=()=>{document.querySelector('#detail').textContent=current.record.candidateName;};focusDetail=()=>{}",ctx);
+ const first=vm.runInContext("open('first')",ctx),second=vm.runInContext("open('second')",ctx);
+ pending[1]({record:{candidateName:'Second'}});await second;pending[0]({record:{candidateName:'First'}});await first;
+ assert.equal(document.querySelector('#detail').textContent,'Second');
+ vm.runInContext('backToList()',ctx);assert.equal(document.querySelector('#results').classList.contains('detail-open'),false);assert.equal(scroll.at(-1),720);
+ const third=vm.runInContext("open('first')",ctx);vm.runInContext('backToList()',ctx);pending[2]({record:{candidateName:'First'}});await third;
+ assert.equal(document.querySelector('#results').classList.contains('detail-open'),false);assert.equal(document.querySelector('#detail').textContent,'Second');
+ assert.equal(calls.length,3);assert.ok(calls.every(c=>c.url.startsWith('/api?action=admin-submissions&id=')&&!c.options?.method));
+});
