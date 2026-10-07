@@ -28,6 +28,27 @@ test('admin score sorting and ranges preserve missing values and compare the sam
  doc.querySelector('#scoreMin').value='';doc.querySelector('#scoreMax').value='';doc.querySelector('#filterTrend').value='up';assert.deepEqual(Array.from(vm.runInContext('fixtures.filter(matchesScoreFilters).map(r=>r.token)',ctx)),['z']);doc.querySelector('#scoreRole').value='cc-publicist';assert.equal(vm.runInContext('listScore(fixtures[0]).delta',ctx),-25);doc.querySelector('#filterTrend').value='down';assert.deepEqual(Array.from(vm.runInContext('fixtures.filter(matchesScoreFilters).map(r=>r.token)',ctx)),['z']);assert.equal(fixtures[0].scoreSummary.final[0].score,90);
 });
 
+test('participant table sorts numeric scores, hides columns and keeps compact labels',()=>{
+ const elements=new Map(),doc={querySelector:s=>{if(!elements.has(s))elements.set(s,{value:'',innerHTML:'',textContent:'',disabled:false});return elements.get(s)},querySelectorAll:()=>[]};
+ const ctx=vm.createContext({document:doc,Date,URLSearchParams,Set});
+ vm.runInContext(fs.readFileSync(new URL('../admin.js',import.meta.url),'utf8').replace(/auth\(\)\.catch\([^\n]+\);/,''),ctx);
+ ctx.cfg={roles:{'cc-executor':{team:'Corporate Communications',role:'Executor'},'pw-executor':{team:'People & Workplace',role:'Executor'}}};
+ vm.runInContext('config=cfg',ctx);
+ const fixture=(name,score)=>({name,code:name,team:'PW',selected:['cc-executor'],preferences:[],recommended:[],selectedSource:'candidate',preAnswers:32,comparisonAnswers:10,readCount:1,scores:{final:{roleScores:{'cc-executor':score},capabilityScores:{},model:'gpt'}},leaderCapability:{}});
+ ctx.data={columns:{roles:['cc-executor','pw-executor'],capabilities:[],leaderCapabilities:[]},records:[fixture('B',9),fixture('A',80)]};
+ vm.runInContext('tableData=data',ctx);doc.querySelector('#tableScoreVersion').value='final';vm.runInContext('renderParticipantTable()',ctx);
+ assert.match(doc.querySelector('#participantTable').innerHTML,/scope="colgroup"/);
+ assert.match(doc.querySelector('#participantTable').innerHTML,/CC · Executor/);
+ assert.doesNotMatch(doc.querySelector('#participantTable').innerHTML,/Corporate Communications/);
+ vm.runInContext("tableSort={key:'role:cc-executor',direction:'desc'};renderParticipantTable()",ctx);
+ assert.ok(doc.querySelector('#participantTable').innerHTML.indexOf('>A</span>')<doc.querySelector('#participantTable').innerHTML.indexOf('>B</span>'));
+ vm.runInContext("tableHidden.add('selected');renderParticipantTable()",ctx);
+ assert.doesNotMatch(doc.querySelector('#participantTable').innerHTML,/Diambil/);
+ assert.equal(doc.querySelector('#tableUnhide').disabled,false);
+ vm.runInContext('tableHidden.clear();renderParticipantTable()',ctx);
+ assert.match(doc.querySelector('#participantTable').innerHTML,/Diambil/);
+});
+
 test('rubric repair renders multiple escaped quotes, score reasons and old/new history only for admin',()=>{
  const source=fs.readFileSync(new URL('../admin.js',import.meta.url),'utf8').replace(/auth\(\)\.catch\([^\n]+\);/,'');
  const context=vm.createContext({document:{querySelector(){},querySelectorAll(){return[];}},Date,URLSearchParams});vm.runInContext(source,context);context.cfg={caps:CAPS,roles:ROLES};vm.runInContext('config=cfg',context);
