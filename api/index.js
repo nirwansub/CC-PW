@@ -1,5 +1,6 @@
 import {recalibrateComparison} from '../lib/recalibration.js';
 import {tableParticipant,tableColumns} from '../lib/admin-table.js';
+import {validatePostSchedule,participantPostInfo} from '../lib/post-schedule.js';
 import {PRE_POST_DEADLINE_AT,PRE_POST_CLOSED_MESSAGE,prePostClosed,blockedAfterDeadline} from '../lib/access-deadline.js';
 import {leadershipReady,LEADERSHIP_VERSION,LEADER_CAPS} from '../lib/leadership.js';
 import {comparisonReady,selfServiceMaterialsReady,roleChoices,CANDIDATE_FLOW_VERSION} from '../lib/candidate-flow.js';
@@ -63,6 +64,7 @@ export default async function handler(req,res){
  if(action==='admin-logout'&&method==='POST'){res.setHeader('Set-Cookie','ansena_admin=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0');return response(res,200,{ok:true});}
  if(action.startsWith('admin-')){
  admin(req);
+ if(action==='admin-post-schedule'&&method==='POST'){const b=body(req);safeToken(b.token);await mutate(path(b.token),r=>{if(b.expectedName!==r.candidateName)throw error(409,'Nama peserta tidak sesuai.');if(b.schedule===null){delete r.postSchedule;return;}r.postSchedule=validatePostSchedule(r,b.schedule);});return response(res,200,{ok:true});}
  if((String(body(req).stage||query(req,'stage')).startsWith('post:')||action==='admin-post-access'&&body(req).enabled===true)&&(await operations()).postTestsLocked)throw error(409,'Post-test dikunci untuk seluruh peserta');
 
  if(action==='admin-recalibrate-comparison'&&method==='POST'){const b=body(req);const result=await recalibrateComparison(b.token,b.phase,await aiConfig(),{chunkSize:b.chunkSize??2});return response(res,200,{ok:true,...result});}
@@ -153,6 +155,7 @@ export default async function handler(req,res){
  if(action==='start'&&b.stage==='comparison'&&!ops.comparisonEnabled)throw error(409,'Pendalaman pembanding belum dibuka oleh admin');
  if(ops.materialsHeld&&(['material-pdf','materials','materials-read'].includes(action)||(['start','quiz'].includes(action)&&(b.stage||query(req,'stage')).startsWith('post:'))))throw error(423,'Materi sedang ditahan untuk pembaruan penilaian. Tunggu pengumuman penyelenggara.');
  if(action==='resolve-code'&&method==='POST')return response(res,200,{token:await resolveCode(b.code,req)});
+ if(action==='post-info'&&method==='POST'){const infoToken=await resolveCode(b.code,req);return response(res,200,participantPostInfo(await record(infoToken)));}
  const token=safeToken(b.token||query(req,'token')||(action==='material-pdf'&&query(req,'code')?await resolveCode(query(req,'code'),req):''));
  if(['save','security-warning','security-resume','security-timeout','submit','violation'].includes(action))await record(token,receivedAt);
  if(ops.selfServeMaterials&&(['material-pdf','materials','materials-read'].includes(action)||(['start','quiz'].includes(action)&&(b.stage||query(req,'stage')).startsWith('post:')))&&!selfServiceMaterialsReady(await record(token)))throw error(403,'Selesaikan 10 soal pendalaman, penilaian dan pilihan posisi sebelum membuka materi');

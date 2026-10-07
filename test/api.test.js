@@ -4,6 +4,26 @@ import test from 'node:test';import assert from 'node:assert/strict';import hand
 process.env.ADMIN_PASSWORD='test-only-password';process.env.ADMIN_SECRET='test-only-random-secret-for-cookie';
 let cookie='';async function req(action,data,params={},auth=true){const headers={host:'localhost:3000',...(auth&&cookie?{cookie}:{})};const request={url:'/api/index?'+new URLSearchParams({action,...params}),method:data?'POST':'GET',headers,body:data};const response={code:200,headers:{},status(c){this.code=c;return this;},setHeader(k,v){this.headers[k]=v;},json(value){this.value=value;return this;},send(value){this.value=value;return this;}};await handler(request,response);return response;}
 const answers=stage=>Object.fromEntries(questionsFor(stage).map(q=>[q.id,q.type==='sjt'?0:'Verifikasi fakta dan risiko, tentukan owner serta tenggat, siapkan alternatif dan catat bukti tindak lanjut.']));
+test('code-only post info remains accessible after cutoff without exposing assessment data',async()=>{
+ reset();const login=await req('admin-login',{password:process.env.ADMIN_PASSWORD});cookie=login.headers['Set-Cookie'].split(';')[0];const inv=(await req('admin-invite',{candidateName:'Info fixture'})).value;
+ await mutate('assessments/v2/'+inv.token+'.json',r=>{r.materialSelection={releasedAt:Date.now(),roles:['cc-executor']};});
+ assert.equal((await req('admin-post-schedule',{token:inv.token,expectedName:inv.candidateName,schedule:{}},{},false)).code,401);
+ const begin=Date.parse('2026-10-08T08:00:00+07:00');assert.equal((await req('admin-post-schedule',{token:inv.token,expectedName:inv.candidateName,schedule:{slots:[{roleKey:'cc-executor',cohort:'Kloter 1',computer:5,cohortStartAt:begin,startAt:begin}]}})).code,200);
+ const published=(await req('post-info',{code:inv.accessCode},{},false)).value;assert.equal(published.schedule.published,true);assert.equal(published.schedule.slots[0].computer,5);
+ await req('admin-post-schedule',{token:inv.token,expectedName:inv.candidateName,schedule:null});
+ const currentNow=Date.now;Date.now=()=>Date.parse('2026-10-08T00:00:00Z');try{
+  const info=await req('post-info',{code:inv.accessCode},{},false);assert.equal(info.code,200);assert.equal(info.value.candidateName,inv.candidateName);assert.equal(info.value.schedule.published,false);assert.equal(info.value.modules[0].label,'CC · Executor');assert.equal('token' in info.value,false);assert.equal('stages' in info.value,false);assert.equal('scores' in info.value,false);
+ }finally{Date.now=currentNow;}
+});
+test('post security warning is enforced by server when ten-second confirmation is missed',async()=>{
+ reset();const login=await req('admin-login',{password:process.env.ADMIN_PASSWORD});cookie=login.headers['Set-Cookie'].split(';')[0];await req('admin-operations',{postTestsLocked:false,materialsHeld:false,comparisonEnabled:false});
+ const token=(await req('admin-invite',{candidateName:'Post security fixture'})).value.token,stage='post:cc-executor',first=questionsFor(stage)[0].id;
+ await mutate('assessments/v2/'+token+'.json',r=>{r.stages[stage]={status:'active',answers:{},revision:0,expiresAt:Date.now()+540000,securityEvents:[]};});
+ const warning=await req('security-warning',{token,stage,answers:{[first]:0},revision:1,eventId:'post-warning',type:'tab_or_app_switch'});assert.equal(warning.code,200);assert.equal(warning.value.deadlineAt-Date.now(),10000);
+ await mutate('assessments/v2/'+token+'.json',r=>{r.stages[stage].securityEvents[0].deadlineAt=Date.now()-1;});
+ assert.equal((await req('save',{token,stage,answers:{[first]:1},revision:2})).code,409);
+ const s=(await req('admin-submissions',null,{id:token})).value.record.stages[stage];assert.equal(s.autoSubmitReason,'security_confirmation_timeout');assert.deepEqual(s.answers,{[first]:0});
+});
 test('post timer is nine server minutes per module and locks saved answers exactly at expiry',async()=>{
  reset();const fixedNow=Date.now;let now=fixedNow();Date.now=()=>now;
  try{
