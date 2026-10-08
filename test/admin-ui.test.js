@@ -74,3 +74,14 @@ test('admin detail navigation ignores stale responses and only reads participant
  assert.equal(document.querySelector('#results').classList.contains('detail-open'),false);assert.equal(document.querySelector('#detail').textContent,'Second');
  assert.equal(calls.length,3);assert.ok(calls.every(c=>c.url.startsWith('/api?action=admin-submissions&id=')&&!c.options?.method));
 });
+
+
+test('final score table keeps exactly twelve columns, highlights finished participants and preserves missing and zero values',()=>{
+ const elements=new Map(),document={querySelector:s=>{if(!elements.has(s))elements.set(s,{value:'',innerHTML:'',textContent:''});return elements.get(s)},querySelectorAll:()=>[]};
+ const ctx=vm.createContext({document,Date,URLSearchParams});vm.runInContext(fs.readFileSync(new URL('../admin.js',import.meta.url),'utf8').replace(/auth\(\)\.catch\([^\n]+\);/,''),ctx);
+ ctx.data={columns:Object.keys(ROLES).map(roleKey=>({roleKey,label:ROLES[roleKey].role})),generatedAt:1,records:[{name:'Zeta',team:'PW',scores:{'cc-executor':0},average:0,leader:true,postComplete:true},{name:'<Pending>',team:'CC',scores:{},average:null,leader:false,postComplete:false}]};
+ vm.runInContext('finalTableData=data;renderFinalTable()',ctx);let html=document.querySelector('#finalScoreTable').innerHTML;assert.equal((html.match(/scope="col"/g)||[]).length,12);assert.match(html,/scope="row" class="name-column"/);assert.match(html,/class="post-complete"/);assert.match(html,/class="post-pending"/);assert.match(html,/&lt;Pending&gt;/);assert.match(html,/<td>0<\/td>/);assert.match(html,/<td>—<\/td>/);assert.equal((html.match(/<td>✓<\/td>/g)||[]).length,1);
+ vm.runInContext("finalTableSort={key:'cc-executor',direction:'desc'};renderFinalTable()",ctx);html=document.querySelector('#finalScoreTable').innerHTML;assert.ok(html.indexOf('>Zeta</span>')<html.indexOf('>&lt;Pending&gt;</span>'));
+ document.querySelector('#finalTableSearch').value='CC';vm.runInContext('renderFinalTable()',ctx);assert.doesNotMatch(document.querySelector('#finalScoreTable').innerHTML,/>Zeta<\/span>/);
+ const page=fs.readFileSync(new URL('../admin.html',import.meta.url),'utf8');assert.match(page,/tbody th\.name-column\{position:sticky;left:0/);assert.match(page,/final-summary-table \.table-columns th\{top:0/);assert.match(page,/id="participantTable"/);
+});
