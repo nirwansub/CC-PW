@@ -1,5 +1,6 @@
 import {recalibrateComparison} from '../lib/recalibration.js';
 import {tableParticipant,tableColumns} from '../lib/admin-table.js';
+import {positionRecommendations,recommendationCandidate} from '../lib/position-recommendations.js';
 import {validatePostSchedule,participantPostInfo,postTiming,POST_TIMING_VERSION} from '../lib/post-schedule.js';
 import {PRE_POST_DEADLINE_AT,PRE_POST_CLOSED_MESSAGE,prePostClosed,blockedAfterDeadline} from '../lib/access-deadline.js';
 import {leadershipReady,postLeadershipReady,LEADERSHIP_VERSION,LEADER_CAPS} from '../lib/leadership.js';
@@ -129,6 +130,19 @@ export default async function handler(req,res){
  if(action==='admin-comparison-reset'&&method==='POST'){const{token,reason}=body(req);if(typeof reason!=='string'||!reason.trim())throw error(400,'Isi alasan mengulang pendalaman');await mutate(path(token),r=>{const s=r.stages.comparison;if(r.materialSelection?.releasedAt||Object.keys(r.stages).some(k=>k.startsWith('post:')))throw error(409,'Tahan ulang materi dan selesaikan review admin sebelum mengulang pendalaman');if(!s||!['submitted','terminated'].includes(s.status))throw error(409,'Pendalaman belum berakhir');if(s.grading?.status==='running'&&s.grading.expiresAt>Date.now())throw error(409,'Tunggu penilaian selesai');r.comparisonHistory??=[];r.comparisonHistory.push({at:Date.now(),reason:reason.slice(0,500),previous:structuredClone(s)});delete r.stages.comparison;});return response(res,200,{ok:true});}
  if(action==='admin-operations'&&method==='POST'){const b=body(req);if(typeof b.materialsHeld!=='boolean'||typeof b.comparisonEnabled!=='boolean')throw error(400,'Status operasional tidak valid');if(b.postTestsLocked!==undefined&&typeof b.postTestsLocked!=='boolean')throw error(400,'Status kunci post-test tidak valid');if(b.selfServeMaterials!==undefined&&typeof b.selfServeMaterials!=='boolean')throw error(400,'Status pemilihan mandiri tidak valid');await write('settings/v3-operations.json',{...await operations(),materialsHeld:b.materialsHeld,comparisonEnabled:b.comparisonEnabled,...(b.selfServeMaterials!==undefined?{selfServeMaterials:b.selfServeMaterials}:{}),...(b.postTestsLocked!==undefined?{postTestsLocked:b.postTestsLocked}:{}),updatedAt:Date.now()});return response(res,200,{ok:true,...await operations()});}
  if(action==='admin-config'&&method==='GET'){const ai=await aiConfig();return response(res,200,{roles:ROLES,caps:CAPS,leaderCaps:LEADER_CAPS,weights:WEIGHTS,pilot:PILOT,duration:DURATION,scoring:SCORING_POLICY,migration:(await read('settings/scoring-v3-deployment-migration.json'))?.value||null,comparisonBank:questionsFor('comparison'),operations:await operations(),ai:{configured:!!ai.key,model:ai.model,reasoning:reasoningFor(ai.model),modelFromEnvironment:!!process.env.ASSESSMENT_AI_MODEL},bank:questionsFor('pre')});}
+ if(action==='admin-position-recommendations'&&method==='GET'){
+  const records=await listValues('assessments/v2/'),selection=(await read('settings/admin-position-shortlists.json'))?.value||{choices:{}};
+  return response(res,200,{positions:positionRecommendations(records,selection),generatedAt:Date.now()});
+ }
+ if(action==='admin-position-shortlist'&&method==='POST'){
+  const {roleKey,token,checked,expectedSelection}=body(req);
+  if(!ROLES[roleKey]||typeof checked!=='boolean'||!(expectedSelection===null||typeof expectedSelection==='boolean'))throw error(400,'Pilihan shortlist tidak valid.');
+  const r=(await read(path(token)))?.value;if(!r||!recommendationCandidate(r,roleKey))throw error(409,'Hasil posisi peserta belum tersedia. Perbarui hasil.');
+  const selectionPath='settings/admin-position-shortlists.json';
+  if(!(await read(selectionPath))){try{await write(selectionPath,{choices:{}},undefined,{create:true});}catch(e){if(!(e instanceof Conflict))throw e;}}
+  await mutate(selectionPath,s=>{s.choices??={};s.choices[roleKey]??={};const old=s.choices[roleKey][token]??null;if(old!==expectedSelection)throw error(409,'Pilihan sudah berubah di perangkat lain. Perbarui hasil sebelum memilih lagi.');s.choices[roleKey][token]=checked;s.updatedAt=Date.now();});
+  return response(res,200,{ok:true,checked});
+ }
  if(action==='admin-bank'&&method==='GET'){const qs=questionsFor(query(req,'stage'));if(!qs)throw error(400,'Tahap tidak valid');return response(res,200,{questions:qs});}
  if(action==='admin-ai'&&method==='POST'){
   const {apiKey,model}=body(req),previous=(await read('settings/v2-ai.json'))?.value||{};
