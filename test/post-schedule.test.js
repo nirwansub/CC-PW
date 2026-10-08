@@ -17,3 +17,9 @@ test('schedule rejects missing, repeated, unexpected and overlapping modules',()
  assert.throws(()=>validatePostSchedule(r,{slots:[input.slots[0],{...input.slots[1],roleKey:'pw-curator'}]}));
  assert.throws(()=>validatePostSchedule(r,{slots:[input.slots[0],{...input.slots[1],startAt}]}));
 });
+
+test('temporary schedule remains explicitly marked for participants',()=>{
+ const schedule=validatePostSchedule(r,{...input,temporary:true});
+ assert.equal(participantPostInfo({...r,postSchedule:schedule}).schedule.temporary,true);
+ assert.throws(()=>validatePostSchedule(r,{...input,temporary:'yes'}));
+});
