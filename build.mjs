@@ -17,4 +17,4 @@ if(process.env.VERCEL_ENV==='production'){const p='settings/leader-invitation-tr
 if(process.env.VERCEL_ENV==='production'){const p='settings/invitation-transfer-20261002-1139.json',t=(await read(p))?.value;if(t?.complete&&t.privateKey)await mutate(p,x=>{delete x.privateKey;delete x.publicKey;x.retiredAt=Date.now();});}
 import {mkdir,copyFile,rm} from 'node:fs/promises';
 await rm('public',{recursive:true,force:true});await mkdir('public');
-for(const f of ['index.html','admin.html','materi.html','materi.js','candidate.js','admin.js','styles.css','info.html','info.js','admin-rekomendasi.html','admin-rekomendasi.js'])await copyFile(f,'public/'+f);
+for(const f of ['index.html','admin.html','materi.html','materi.js','candidate.js','admin.js','styles.css','info.html','info.js','admin-rekomendasi.html','admin-rekomendasi.js','participant-photo.js','participant-photo.css'])await copyFile(f,'public/'+f);
