@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {extendActivePost} from '../lib/post-time-extension.js';
+test('one-time compensation targets only post sessions opened at snapshot and preserves answers and later default sessions',()=>{
+ const now=1000000,config={incidentId:'power-outage',snapshotAt:now,extraMs:300000};const r={stages:{'post:cc-executor':{status:'active',startedAt:now-100000,expiresAt:now+100000,answers:{x:2},revision:7},'post:pw-executor':{status:'active',startedAt:now+1,expiresAt:now+540001},pre:{status:'active',startedAt:now-1,expiresAt:now+100},'post:cc-publicist':{status:'submitted',startedAt:now-1,expiresAt:now+50}}};
+ assert.equal(extendActivePost(r,config,now).length,1);assert.equal(r.stages['post:cc-executor'].expiresAt,now+400000);assert.deepEqual(r.stages['post:cc-executor'].answers,{x:2});assert.equal(r.stages['post:cc-executor'].revision,7);assert.equal(r.stages['post:pw-executor'].expiresAt,now+540001);assert.equal(r.stages.pre.expiresAt,now+100);assert.equal(extendActivePost(r,config,now)[0].status,'already_applied');assert.equal(r.stages['post:cc-executor'].expiresAt,now+400000);
+});
