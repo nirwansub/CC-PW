@@ -29,10 +29,10 @@ test('post timer is nine server minutes per module and locks saved answers exact
  try{
   const login=await req('admin-login',{password:process.env.ADMIN_PASSWORD});cookie=login.headers['Set-Cookie'].split(';')[0];
   await req('admin-operations',{postTestsLocked:false,materialsHeld:false,comparisonEnabled:false,selfServeMaterials:false});
-  const token=(await req('admin-invite',{candidateName:'QA nine-minute post'})).value.token;
+  const token=(await req('admin-invite',{candidateName:'QA thirteen-minute post'})).value.token;
   await mutate('assessments/v2/'+token+'.json',r=>{r.stages.pre={status:'submitted',securityEvents:[],grading:{status:'complete'},result:{complete:true,capability:[],roleFits:[{roleKey:'cc-creative',score:50},{roleKey:'pw-curator',score:50}]}};r.materialSelection={roles:['cc-creative','pw-curator'],releasedAt:now};r.materialRead={'cc-creative':now,'pw-curator':now};r.postTestAccess={enabled:true};});
-  const stage='post:cc-creative',start=await req('start',{token,stage});assert.equal(start.code,200);assert.equal(start.value.expiresAt-start.value.serverNow,540000);
-  now+=539999;const first=questionsFor(stage)[0].id;
+  const stage='post:cc-creative',start=await req('start',{token,stage});assert.equal(start.code,200);assert.equal(start.value.expiresAt-start.value.serverNow,780000);
+  now+=779999;const first=questionsFor(stage)[0].id;
   assert.equal((await req('save',{token,stage,answers:{[first]:0},revision:1})).code,200);
   assert.equal((await req('quiz',null,{token,stage})).value.expiresAt,start.value.expiresAt);
   assert.equal((await req('violation',{token,stage,type:'time_expired',answers:{[first]:1}})).code,409);
@@ -40,7 +40,7 @@ test('post timer is nine server minutes per module and locks saved answers exact
   assert.equal((await req('quiz',null,{token,stage})).code,409);
   assert.equal((await req('violation',{token,stage,type:'time_expired',answers:{[first]:1}})).code,200);
   const s=(await req('admin-submissions',null,{id:token})).value.record.stages[stage];assert.deepEqual(s.answers,{[first]:0});assert.equal(s.status,'terminated');assert.equal(s.terminationReason,'time_expired');assert.equal(s.submittedAt,start.value.expiresAt);
-  const second=await req('start',{token,stage:'post:pw-curator'});assert.equal(second.code,200);assert.equal(second.value.expiresAt-now,540000);
+  const second=await req('start',{token,stage:'post:pw-curator'});assert.equal(second.code,200);assert.equal(second.value.expiresAt-now,780000);
  }finally{Date.now=fixedNow;}
 });
 function mockAI(){globalThis.fetch=async(url,opt)=>{const input=JSON.parse(JSON.parse(opt.body).input);return new Response(JSON.stringify({status:'completed',model:'mock-for-tests',usage:{total_tokens:1},output:[{content:[{type:'output_text',text:JSON.stringify({grades:input.map(q=>({id:q.id,criteria:q.criteria.map(c=>({cap:c.cap,score:3,evidence:q.answer,confidence:.9,fulfilled:['Langkah tindak lanjut'],missing:['Rincian pemeriksaan'],rationale:'Langkah dapat dijalankan, pemeriksaan belum lengkap.'})),flags:[]}))})}]}]}),{status:200});};}
@@ -60,7 +60,7 @@ test('kode tetap sampai post, pre 15 menit, materi admin, profil non-scoring dan
  const released=await req('admin-materials',{token,roles:[role]});assert.equal(released.code,200);assert.ok(released.value.qr.includes('<svg'));assert.ok(released.value.url.includes('code='+inv.value.accessCode));assert.equal((await req('materials',null,{token,role})).code,200);assert.equal((await req('materials-read',{token,role})).code,200);
  assert.equal((await req('start',{token,stage:'practical:'+role})).code,409);
  assert.equal((await req('invite',null,{token})).value.postTestEnabled,false);assert.equal((await req('start',{token,stage:'post:'+role})).code,409);assert.equal((await req('admin-post-access',{token,enabled:true},{},false)).code,401);assert.equal((await req('admin-post-access',{token,enabled:true})).code,200);assert.equal((await req('invite',null,{token})).value.postTestEnabled,true);assert.equal((await req('admin-post-access',{token,enabled:false})).code,200);assert.equal((await req('start',{token,stage:'post:'+role})).code,409);await req('admin-post-access',{token,enabled:true});
- const stage='post:'+role;assert.equal((await req('start',{token,stage})).code,200);assert.equal((await req('admin-post-access',{token,enabled:false})).code,409);assert.equal((await req('quiz',null,{token,stage})).value.expiresAt-Date.now(),540000);assert.equal((await req('save',{token,stage,answers:answers(stage),revision:1})).code,200);assert.equal((await req('submit',{token,stage,answers:answers(stage)})).code,200);assert.equal((await req('evaluate',{token,stage})).code,200);
+ const stage='post:'+role;assert.equal((await req('start',{token,stage})).code,200);assert.equal((await req('admin-post-access',{token,enabled:false})).code,409);assert.equal((await req('quiz',null,{token,stage})).value.expiresAt-Date.now(),780000);assert.equal((await req('save',{token,stage,answers:answers(stage),revision:1})).code,200);assert.equal((await req('submit',{token,stage,answers:answers(stage)})).code,200);assert.equal((await req('evaluate',{token,stage})).code,200);
  assert.equal((await req('resolve-code',{code:inv.value.accessCode},{},false)).value.token,token);
  const detail=(await req('admin-submissions',null,{id:token})).value;assert.notEqual(detail.roleResults[0].post,null);assert.equal(detail.roleResults[0].practicalStatus,'external');assert.equal(detail.record.profile.english,'Fluent');const scoreBeforeNotes=detail.record.stages.pre.result;await req('admin-notes',{token,notes:'Observasi tambahan',checklist:{creative:'yes',risk:'mid'}});assert.deepEqual((await req('admin-submissions',null,{id:token})).value.record.stages.pre.result,scoreBeforeNotes);assert.equal((await req('admin-bank',null,{stage:'pre'},false)).code,401);assert.equal((await req('start',start)).code,409);
  }finally{globalThis.fetch=realFetch;}});
