@@ -7,7 +7,7 @@ import {leadershipReady} from '../lib/leadership.js';
 test('code-based schedule release preserves an incomplete leader assessment and opens only authorized post modules after cutoff',async()=>{
  reset();const realNow=Date.now;Date.now=()=>Date.parse('2026-10-08T10:00:00+07:00');
  process.env.ADMIN_PASSWORD='release-test';process.env.ADMIN_SECRET='release-test-secret';let cookie='';
- const api=async(action,data,params={},auth=true)=>{const req={url:'/api?'+new URLSearchParams({action,...params}),method:data?'POST':'GET',headers:{host:'localhost',...(auth&&cookie?{cookie}:{})},body:data},res={code:200,headers:{},status(n){this.code=n;return this;},setHeader(k,v){this.headers[k]=v;},json(v){this.value=v;return this;}};await handler(req,res);return res;};
+ const api=async(action,data,params={},auth=true)=>{const req={url:'/api?'+new URLSearchParams({action,...params}),method:data?'POST':'GET',headers:{host:'localhost',...(auth&&cookie?{cookie}:{})},body:data},res={code:200,headers:{},status(n){this.code=n;return this;},setHeader(k,v){this.headers[k]=v;},json(v){this.value=v;return this;},send(v){this.value=v;return this;}};await handler(req,res);return res;};
  try{
   const login=await api('admin-login',{password:'release-test'});cookie=login.headers['Set-Cookie'].split(';')[0];
   await write('settings/v3-operations.json',{materialsHeld:false,postTestsLocked:false,selfServeMaterials:true});
@@ -23,6 +23,19 @@ test('code-based schedule release preserves an incomplete leader assessment and 
   assert.equal(leadershipReady(record),false);assert.deepEqual(record.stages.comparison,original);assert.equal(record.stages.leadership,undefined);
   const info=(await api('post-info',{code:inv.accessCode},{},false)).value;
   assert.equal(info.schedule.published,true);assert.equal(info.testMinutes,9);assert.equal(info.schedule.briefingAt,start-600000);assert.equal('token' in info,false);
+  assert.match(info.download.url,/action=material-pdf/);assert.match(info.download.qr,/<svg/);
+  const pdf=await api('material-pdf',null,{code:inv.accessCode},false);
+  assert.equal(pdf.code,200);assert.equal(pdf.headers['Content-Type'],'application/pdf');assert.equal(pdf.value.subarray(0,4).toString(),'%PDF');
+  assert.equal((await api('candidate-materials',{token:inv.token,roles:['cc-creative']},{},false)).code,423);
+  assert.deepEqual((await read('assessments/v2/'+inv.token+'.json')).value.materialSelection.roles,roles);
+  await write('settings/v3-operations.json',{materialsHeld:true,postTestsLocked:false,selfServeMaterials:true});
+  assert.equal((await api('post-info',{code:inv.accessCode},{},false)).value.download,null);
+  assert.equal((await api('material-pdf',null,{code:inv.accessCode},false)).code,423);
+  await write('settings/v3-operations.json',{materialsHeld:false,postTestsLocked:false,selfServeMaterials:true});
+  await mutate('assessments/v2/'+inv.token+'.json',r=>{r.postTestAccess.enabled=false;});
+  assert.equal((await api('post-info',{code:inv.accessCode},{},false)).value.download,null);
+  assert.equal((await api('material-pdf',null,{code:inv.accessCode},false)).code,423);
+  await mutate('assessments/v2/'+inv.token+'.json',r=>{r.postTestAccess.enabled=true;});
   const state=(await api('invite',null,{token:inv.token})).value;
   assert.equal(state.prePostClosed,true);assert.equal(state.postTestEnabled,true);assert.equal(state.leadershipReady,false);assert.equal(state.materialRoles.length,4);assert.equal(state.download,null);
   assert.equal((await api('start',{token:inv.token,stage:'post:pw-curator'})).code,200);
