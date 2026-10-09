@@ -1,3 +1,4 @@
+import {profileRows,profileEligible,profileInput,profileHash,summarizeProfiles,PROFILE_INSIGHT_VERSION} from '../lib/profile-insights.js';
 import {participantPhoto} from '../lib/participant-photo.js';
 import {finalScoreColumns,finalScoreRow} from '../lib/final-score-table.js';
 import {recoverPost,recoverEmptyPost} from '../lib/post-recovery.js';
@@ -154,7 +155,25 @@ export default async function handler(req,res){
  if(action==='admin-config'&&method==='GET'){const ai=await aiConfig();return response(res,200,{roles:ROLES,caps:CAPS,leaderCaps:LEADER_CAPS,weights:WEIGHTS,pilot:PILOT,duration:DURATION,scoring:SCORING_POLICY,migration:(await read('settings/scoring-v3-deployment-migration.json'))?.value||null,comparisonBank:questionsFor('comparison'),operations:await operations(),ai:{configured:!!ai.key,model:ai.model,reasoning:reasoningFor(ai.model),modelFromEnvironment:!!process.env.ASSESSMENT_AI_MODEL},bank:questionsFor('pre')});}
  if(action==='admin-position-recommendations'&&method==='GET'){
   const records=await listValues('assessments/v2/'),selection=(await read('settings/admin-position-shortlists.json'))?.value||{choices:{}};
-  return response(res,200,{positions:positionRecommendations(records,selection),generatedAt:Date.now()});
+  const cache=(await read('settings/admin-profile-insights.json'))?.value||{entries:{}},reviews=(await read('settings/admin-profile-reviews.json'))?.value||{choices:{}};
+  return response(res,200,{positions:positionRecommendations(records,selection),profiles:profileRows(records,cache,reviews),generatedAt:Date.now()});
+ }
+ if(action==='admin-profile-summarize'&&method==='POST'){
+  const {tokens}=body(req);if(!Array.isArray(tokens)||!tokens.length||tokens.length>4||new Set(tokens).size!==tokens.length)throw error(400,'Pilih 1–4 peserta unik.');
+  const records=[];for(const token of tokens){safeToken(token);const r=(await read(path(token)))?.value;if(!r||!profileEligible(r))throw error(409,'Peserta tidak tersedia untuk tinjauan profil.');if(Object.keys(profileInput(r)).length)records.push(r);}
+  const cachePath='settings/admin-profile-insights.json',cache=(await read(cachePath))?.value||{entries:{}};
+  const todo=records.filter(r=>cache.entries?.[r.token]?.hash!==profileHash(r)||cache.entries?.[r.token]?.version!==PROFILE_INSIGHT_VERSION);
+  const entries=todo.length?await summarizeProfiles(todo,await aiConfig()):[];
+  if(entries.length){if(!(await read(cachePath))){try{await write(cachePath,{entries:{}},undefined,{create:true});}catch(e){if(!(e instanceof Conflict))throw e;}}
+   await mutate(cachePath,c=>{c.entries??={};for(const entry of entries)c.entries[entry.token]=entry;c.updatedAt=Date.now();});}
+  const latest=(await read(cachePath))?.value||cache;return response(res,200,{ok:true,profiles:profileRows(records,latest,(await read('settings/admin-profile-reviews.json'))?.value),processed:entries.length});
+ }
+ if(action==='admin-profile-review'&&method==='POST'){
+  const {roleKey,token,checked,expectedSelection}=body(req);safeToken(token);
+  if(!ROLES[roleKey]||typeof checked!=='boolean'||!(expectedSelection===null||typeof expectedSelection==='boolean'))throw error(400,'Penanda tinjauan tidak valid.');
+  const r=(await read(path(token)))?.value;if(!r||!profileEligible(r))throw error(409,'Peserta tidak tersedia.');
+  const reviewPath='settings/admin-profile-reviews.json';if(!(await read(reviewPath))){try{await write(reviewPath,{choices:{}},undefined,{create:true});}catch(e){if(!(e instanceof Conflict))throw e;}}
+  await mutate(reviewPath,s=>{s.choices??={};s.choices[token]??={};if((s.choices[token][roleKey]??null)!==expectedSelection)throw error(409,'Penanda berubah di perangkat lain. Perbarui hasil.');s.choices[token][roleKey]=checked;s.updatedAt=Date.now();});return response(res,200,{ok:true,checked});
  }
  if(action==='admin-position-shortlist'&&method==='POST'){
   const {roleKey,token,checked,expectedSelection}=body(req);

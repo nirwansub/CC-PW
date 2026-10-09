@@ -14,11 +14,19 @@ test('portrait markup escapes identities, rejects unsafe sources and failed imag
  assert.doesNotMatch(window.participantPhotoMarkup({url:'javascript:alert(1)'},'Unknown'),/<img/);let removed=false;listener({target:{matches:()=>true,remove:()=>removed=true}});assert.equal(removed,true);
 });
 test('recommendation portraits render between rank and participant name and empty-state spans eight columns',()=>{
- const elements=new Map(),document={querySelector:s=>{if(!elements.has(s))elements.set(s,{innerHTML:'',textContent:'',hidden:false,addEventListener(){}});return elements.get(s)}};
+ const elements=new Map(),document={querySelector:s=>{if(!elements.has(s))elements.set(s,{innerHTML:'',value:'',setAttribute(){},textContent:'',hidden:false,addEventListener(){}});return elements.get(s)}};
  const ctx=vm.createContext({document,window:{participantPhotoMarkup:()=>'<img class="fixture-portrait">'},Set});
  vm.runInContext(fs.readFileSync(new URL('../admin-rekomendasi.js',import.meta.url),'utf8').replace(/\nload\(\);\s*$/,''),ctx);
  ctx.fixture={roleKey:'cc-executor',label:'CC Executor',candidates:[{name:'Example',rank:1,selected:true,manual:null,pre:50,comparison:60,post:70,final:62.5,answered:6,total:6}]};
  vm.runInContext("positions=[fixture];activeRole='cc-executor';render()",ctx);
  const html=document.querySelector('#rankingRows').innerHTML;assert.match(html,/<td>1<\/td><td class="photo-column"><img class="fixture-portrait"><\/td><td class="name">/);
  vm.runInContext('positions[0].candidates=[];render()',ctx);assert.match(document.querySelector('#rankingRows').innerHTML,/colspan="8"/);
+});
+test('mass profile review filters missing scores separately, escapes text and keeps review distinct from shortlist',()=>{
+ const elements=new Map(),document={querySelector:s=>{if(!elements.has(s))elements.set(s,{innerHTML:'',textContent:'',value:'',hidden:false,setAttribute(){},addEventListener(){}});return elements.get(s)}};
+ document.querySelector('#profileFilter').value='low';document.querySelector('#profileThreshold').value='60';
+ const ctx=vm.createContext({document,window:{participantPhotoMarkup:()=>''},Set});vm.runInContext(fs.readFileSync(new URL('../admin-rekomendasi.js',import.meta.url),'utf8').replace(/\nload\(\);\s*$/,''),ctx);
+ ctx.fixture={token:'test',name:'<Example>',code:'123',team:'A',status:'ready',profile:{talents:'Excel'},summary:'<script>bad</script>',skills:['Excel'],chosenRoles:[],reviewed:{},scores:{'pw-curator':45},roles:[{roleKey:'pw-curator',basis:'experience',reason:'Database',evidence:[{field:'talents',quote:'Excel'}],verify:'Show project'}]};
+ vm.runInContext("activeRole='pw-curator';profiles=[fixture,{...fixture,token:'missing',name:'Missing',scores:{}}];renderProfiles()",ctx);let html=document.querySelector('#profileRows').innerHTML;assert.match(html,/&lt;Example&gt;/);assert.doesNotMatch(html,/<script>/);assert.doesNotMatch(html,/Missing/);assert.match(html,/data-review-token="test"/);assert.doesNotMatch(html,/data-token=/);
+ document.querySelector('#profileFilter').value='unselected';vm.runInContext('renderProfiles()',ctx);assert.match(document.querySelector('#profileRows').innerHTML,/Missing/);
 });
