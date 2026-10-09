@@ -6,3 +6,5 @@
 .ranking-table .photo-column{width:68px;min-width:68px;text-align:center}
 
 .admin-page .listitem{position:relative;padding-right:68px}.admin-page .list-photo{position:absolute;right:12px;top:12px}
+
+.admin-page .final-summary-table .photo-column{padding:9px 8px;text-overflow:clip;overflow:hidden}.admin-page .final-summary-table .photo-column .participant-avatar{display:flex;margin:0 auto}
