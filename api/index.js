@@ -200,7 +200,7 @@ export default async function handler(req,res){
  if(action==='admin-position-shortlist'&&method==='POST'){
   const {roleKey,token,checked,expectedSelection}=body(req);
   if(!ROLES[roleKey]||typeof checked!=='boolean'||!(expectedSelection===null||typeof expectedSelection==='boolean'))throw error(400,'Pilihan shortlist tidak valid.');
-  const r=(await read(path(token)))?.value;if(!r||!recommendationCandidate(r,roleKey))throw error(409,'Hasil posisi peserta belum tersedia. Perbarui hasil.');
+  const r=(await read(path(token)))?.value;if(!r||!recommendationCandidate(r,roleKey,{includePending:true}))throw error(409,'Peserta belum tersedia untuk posisi ini. Perbarui hasil.');
   const selectionPath='settings/admin-position-shortlists.json';
   if(!(await read(selectionPath))){try{await write(selectionPath,{choices:{}},undefined,{create:true});}catch(e){if(!(e instanceof Conflict))throw e;}}
   await mutate(selectionPath,s=>{s.choices??={};s.choices[roleKey]??={};const old=s.choices[roleKey][token]??null;if(old!==expectedSelection)throw error(409,'Pilihan sudah berubah di perangkat lain. Perbarui hasil sebelum memilih lagi.');s.choices[roleKey][token]=checked;s.updatedAt=Date.now();});
