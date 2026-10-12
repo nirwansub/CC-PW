@@ -1,3 +1,4 @@
+import {leaderRows,leaderInput,leaderHash,analyzeLeaders,LEADER_REVIEW_VERSION} from '../lib/leader-recommendations.js';
 import {profileRows,profileEligible,profileInput,profileHash,summarizeProfiles,PROFILE_INSIGHT_VERSION} from '../lib/profile-insights.js';
 import {participantPhoto} from '../lib/participant-photo.js';
 import {finalScoreColumns,finalScoreRow} from '../lib/final-score-table.js';
@@ -156,7 +157,24 @@ export default async function handler(req,res){
  if(action==='admin-position-recommendations'&&method==='GET'){
   const records=await listValues('assessments/v2/'),selection=(await read('settings/admin-position-shortlists.json'))?.value||{choices:{}};
   const cache=(await read('settings/admin-profile-insights.json'))?.value||{entries:{}},reviews=(await read('settings/admin-profile-reviews.json'))?.value||{choices:{}};
-  return response(res,200,{positions:positionRecommendations(records,selection),profiles:profileRows(records,cache,reviews),generatedAt:Date.now()});
+  const leaderCache=(await read('settings/admin-leader-insights.json'))?.value||{entries:{}},leaderSelection=(await read('settings/admin-leader-shortlist.json'))?.value||{choices:{}};
+  return response(res,200,{positions:positionRecommendations(records,selection),profiles:profileRows(records,cache,reviews),leaders:leaderRows(records,leaderCache,leaderSelection),generatedAt:Date.now()});
+ }
+ if(action==='admin-leader-analyze'&&method==='POST'){
+  const {tokens}=body(req);if(!Array.isArray(tokens)||!tokens.length||tokens.length>2||new Set(tokens).size!==tokens.length)throw error(400,'Pilih 1–2 peserta unik.');
+  const records=[];for(const token of tokens){safeToken(token);const r=(await read(path(token)))?.value;if(!r||!profileEligible(r))throw error(409,'Peserta tidak tersedia untuk analisis leader.');const input=leaderInput(r);if(input.cases.length||Object.keys(input.profile).length)records.push(r);}
+  const cachePath='settings/admin-leader-insights.json',cache=(await read(cachePath))?.value||{entries:{}};
+  const todo=records.filter(r=>cache.entries?.[r.token]?.hash!==leaderHash(r)||cache.entries?.[r.token]?.version!==LEADER_REVIEW_VERSION);
+  const entries=todo.length?await analyzeLeaders(todo,await aiConfig()):[];
+  if(entries.length){if(!(await read(cachePath))){try{await write(cachePath,{entries:{}},undefined,{create:true});}catch(e){if(!(e instanceof Conflict))throw e;}}
+   await mutate(cachePath,c=>{c.entries??={};for(const entry of entries)c.entries[entry.token]=entry;c.updatedAt=Date.now();});}
+  return response(res,200,{ok:true,leaders:leaderRows(records,(await read(cachePath))?.value||cache,(await read('settings/admin-leader-shortlist.json'))?.value),processed:entries.length});
+ }
+ if(action==='admin-leader-shortlist'&&method==='POST'){
+  const {token,checked,expectedSelection}=body(req);safeToken(token);if(typeof checked!=='boolean'||!(expectedSelection===null||typeof expectedSelection==='boolean'))throw error(400,'Pilihan leader tidak valid.');
+  const r=(await read(path(token)))?.value;if(!r||!profileEligible(r))throw error(409,'Peserta tidak tersedia.');
+  const selectionPath='settings/admin-leader-shortlist.json';if(!(await read(selectionPath))){try{await write(selectionPath,{choices:{}},undefined,{create:true});}catch(e){if(!(e instanceof Conflict))throw e;}}
+  await mutate(selectionPath,s=>{s.choices??={};if((s.choices[token]??null)!==expectedSelection)throw error(409,'Pilihan berubah di perangkat lain. Perbarui hasil.');s.choices[token]=checked;s.updatedAt=Date.now();});return response(res,200,{ok:true,checked});
  }
  if(action==='admin-profile-summarize'&&method==='POST'){
   const {tokens}=body(req);if(!Array.isArray(tokens)||!tokens.length||tokens.length>4||new Set(tokens).size!==tokens.length)throw error(400,'Pilih 1–4 peserta unik.');
