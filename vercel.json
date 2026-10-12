@@ -32,7 +32,7 @@
   "outputDirectory": "public",
   "functions": {
     "api/index.js": {
-      "maxDuration": 90,
+      "maxDuration": 300,
       "includeFiles": "materials/**"
     }
   }
