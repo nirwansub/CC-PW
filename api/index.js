@@ -160,6 +160,9 @@ export default async function handler(req,res){
   const leaderCache=(await read('settings/admin-leader-insights.json'))?.value||{entries:{}},leaderSelection=(await read('settings/admin-leader-shortlist.json'))?.value||{choices:{}};
   return response(res,200,{positions:positionRecommendations(records,selection),profiles:profileRows(records,cache,reviews),leaders:leaderRows(records,leaderCache,leaderSelection),generatedAt:Date.now()});
  }
+ if(action==='admin-leader-evidence'&&method==='GET'){
+  const token=safeToken(query(req,'token')),r=(await read(path(token)))?.value;if(!r||!profileEligible(r))throw error(409,'Peserta tidak tersedia.');const hash=leaderHash(r);if(query(req,'expectedHash')!==hash)throw error(409,'Jawaban atau rubrik sumber berubah. Perbarui analisis leader dahulu.');return response(res,200,{hash,cases:leaderInput(r).cases.map(({answer,...source})=>({...source,criteria:source.criteria.map(c=>({...c,label:CAPS[c.cap]||LEADER_CAPS[c.cap]||c.cap}))}))});
+ }
  if(action==='admin-leader-analyze'&&method==='POST'){
   const {tokens}=body(req);if(!Array.isArray(tokens)||!tokens.length||tokens.length>2||new Set(tokens).size!==tokens.length)throw error(400,'Pilih 1–2 peserta unik.');
   const records=[];for(const token of tokens){safeToken(token);const r=(await read(path(token)))?.value;if(!r||!profileEligible(r))throw error(409,'Peserta tidak tersedia untuk analisis leader.');const input=leaderInput(r);if(input.cases.length||Object.keys(input.profile).length)records.push(r);}
