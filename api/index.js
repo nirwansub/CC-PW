@@ -16,7 +16,7 @@ import {recalculateRecord} from '../lib/revision.js';
 import crypto from 'node:crypto';
 import {ROLES,CAPS,WEIGHTS,VERSION,PILOT,DURATION,HANDBOOK,COMMON_HANDBOOK,POST_BANK_VERSION,questionsFor,publicQuestions} from '../lib/assessment.js';
 import {validateAnswers,aggregate,routing,candidateSummary,finalRoleResults,primaryAssessment,baselineReady,SCORING_VERSION,SCORING_POLICY} from '../lib/scoring.js';
-import {gradeEssays,GRADING_VERSION,DEFAULT_GRADING_MODEL,reasoningFor} from '../lib/grading.js';
+import {gradeEssays,GRADING_VERSION,DEFAULT_GRADING_MODEL,reasoningFor,gradingLeaseMs} from '../lib/grading.js';
 import {AUDIT_VERSION,inspectEvidence,auditInventory,auditSemantics,fingerprint,gradeChanges,applyEvidenceRevision} from '../lib/evidence-audit.js';
 import {read,write,mutate,listValues,remove,Conflict} from '../lib/storage.js';
 import {reserveCode,assignCode,resolveCode} from '../lib/access.js';
@@ -56,11 +56,11 @@ async function evaluate(token,stage){
  await record(token);
  const p=path(token);let snapshot;const jobId=uid();
  await mutate(p,r=>{allowed(r,stage);const s=r.stages[stage];if(!s||!['submitted','terminated'].includes(s.status))throw error(409,'Jawaban belum dikirim');if(s.grading?.status==='complete'){snapshot=null;return;}
- if(s.grading?.status==='running'&&s.grading.expiresAt>Date.now())throw error(409,'Penilaian sedang berjalan');s.grading={status:'running',jobId,expiresAt:Date.now()+80000};snapshot=structuredClone(s);});
+ if(s.grading?.status==='running'&&s.grading.expiresAt>Date.now())throw error(409,'Penilaian sedang berjalan');s.grading={status:'running',jobId,expiresAt:Date.now()+gradingLeaseMs(stage)};snapshot=structuredClone(s);});
  if(!snapshot)return{ok:true};
  try{const cfg=await aiConfig(),postOps=stage==='comparison'?await operations():null;const evaluated=await gradeEssays(stage,snapshot.answers,cfg.key,cfg.model,undefined,snapshot.questionBankVersion||'legacy');const result=aggregate(stage,snapshot.answers,evaluated.grades,snapshot.questionBankVersion||'legacy');
  await mutate(p,r=>{const s=r.stages[stage];if(s.grading?.jobId!==jobId)throw error(409,'Penilaian sudah diperbarui');s.grades=evaluated.grades;s.result=result;s.grading={...evaluated,status:'complete',grades:undefined};s.reviewRequired=evaluated.reviewRequired||s.status==='terminated'||s.securityEvents.some(e=>e.kind==='warning');if(postOps)prepareInternalPost(r,postOps);});return{ok:true};
- }catch(e){await mutate(p,r=>{const s=r.stages[stage];if(s.grading?.jobId===jobId)s.grading={status:e.code==='AI_NOT_CONFIGURED'?'not_configured':'failed',error:e.code||'AI_REVIEW_REQUIRED',updatedAt:Date.now()};});throw error(e.code==='AI_NOT_CONFIGURED'?503:502,e.message);}
+ }catch(e){await mutate(p,r=>{const s=r.stages[stage];if(s.grading?.jobId===jobId)s.grading={status:e.code==='AI_NOT_CONFIGURED'?'not_configured':'failed',error:e.name==='TimeoutError'?'AI_TIMEOUT':e.code||'AI_REVIEW_REQUIRED',updatedAt:Date.now()};});throw error(e.code==='AI_NOT_CONFIGURED'?503:502,e.name==='TimeoutError'?'Penilaian AI melewati batas waktu. Jawaban tetap tersimpan; coba penilaian lagi.':e.message);}
 }
 export default async function handler(req,res){
  res.setHeader('Cache-Control','no-store');
@@ -121,7 +121,7 @@ export default async function handler(req,res){
     const audit=inspectEvidence(stage,s),semantic=s.evidenceAudit;
     if(!audit.affected&&!(semantic?.version===AUDIT_VERSION&&semantic?.sourceFingerprint===source&&semantic.needsReview))throw error(409,'Tidak ada temuan audit yang memerlukan penilaian ulang');
    }
-   snapshot=structuredClone(s);s.evidenceJob={id:jobId,action,expiresAt:Date.now()+80000};
+   snapshot=structuredClone(s);s.evidenceJob={id:jobId,action,expiresAt:Date.now()+gradingLeaseMs(stage)};
   });
   if(cached)return response(res,200,{ok:true,cached:true,result:cached});
   try{
